@@ -17,9 +17,6 @@ use libc::{uint8_t,
 // B8G8R8A8 pixel size in bytes
 static PIXEL_SIZE: usize = 4;
 
-// Like the failed windows one
-macro_rules! FAILED { ($hr:expr) => ($hr < 0) }
-
 enum CaptureResult {
 	CrOk,
 	// Could not duplicate output, access denied. Might be in protected fullscreen.
@@ -90,17 +87,22 @@ impl Frame {
 		// Skip every second row and column for better performance, with not too much
 		// signal loss for most monitors
 		let (widthf32, heightf32) = ((self.width/2) as f32, (self.height/2) as f32);
-		for row in (y1f * heightf32) as usize .. (y2f * heightf32) as usize {
-			for col in (x1f * widthf32) as usize .. (x2f * widthf32) as usize {
+		let (start_y, end_y, start_x, end_x) = ((y1f * heightf32) as usize,
+			(y2f * heightf32) as usize, (x1f * widthf32) as usize,
+			(x2f * widthf32) as usize);
+		for row in start_y..end_y {
+			for col in start_x..end_x {
 				let i = 2 * PIXEL_SIZE * (row * self.width + col);
+				// println!("b val: {}", self.data[i]);
 				b_sum += self.data[i] as u64;
 				g_sum += self.data[i+1] as u64;
 				r_sum += self.data[i+2] as u64;
 			}
 		}
 
-		let n64 = (self.width * self.height) as u64;
-		RGB8{ red: (r_sum/n64) as u8, green: (g_sum/n64) as u8, blue: (b_sum/n64) as u8 }
+		let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
+		RGB8{ red: (r_sum/n_of_pixels) as u8, green: (g_sum/n_of_pixels) as u8,
+			blue: (b_sum/n_of_pixels) as u8 }
 	}
 }
 
@@ -236,6 +238,7 @@ fn main() {
 		}
 
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
+
 		let mut shared_frame = Arc::new(frame);
 
 		let out_vals: Vec<_> = LEDS.iter()
@@ -250,6 +253,6 @@ fn main() {
 		unsafe { capturer.replace_frame(mem::replace(shared_frame.make_unique(),
 			Frame::new())); }
 
-		println!("{:?}", out_vals);
+		// println!("{:?}\n", out_vals);
 	}
 }
