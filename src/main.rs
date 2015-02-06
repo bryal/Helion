@@ -1,6 +1,10 @@
 #![feature(libc, core, std_misc, io, alloc)]
 
 extern crate libc;
+extern crate "rustc-serialize" as rustc_serialize;
+extern crate time;
+
+use config::Led;
 
 use std::ptr;
 use std::mem;
@@ -14,8 +18,14 @@ use libc::{uint8_t,
 	c_void,
 	size_t};
 
-// B8G8R8A8 pixel size in bytes
+mod config;
+
+// B8G8R8A8, DXGI default, pixel size in bytes
 static PIXEL_SIZE: usize = 4;
+
+static FPS_CAP: f64 = 30.0;
+
+static SKIP_PIXELS: usize = 3;
 
 enum CaptureResult {
 	CrOk,
@@ -80,19 +90,19 @@ impl Frame {
 		Frame{ width: 0, height: 0, data: Vec::new() }
 	}
 
-	fn average_color(&self, led: &Led) -> RGB8 {
+	fn average_color(&self, led: Led) -> RGB8 {
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-		// Coordinate factors
-		let &Led((x1f, y1f), (x2f, y2f)) = led;
 		// Skip every second row and column for better performance, with not too much
 		// signal loss for most monitors
-		let (widthf32, heightf32) = ((self.width/2) as f32, (self.height/2) as f32);
-		let (start_y, end_y, start_x, end_x) = ((y1f * heightf32) as usize,
-			(y2f * heightf32) as usize, (x1f * widthf32) as usize,
-			(x2f * widthf32) as usize);
+		let (widthf32, heightf32) = ((self.width/SKIP_PIXELS) as f32,
+			(self.height/SKIP_PIXELS) as f32);
+		let (start_y, end_y, start_x, end_x) = ((led.vscan.minimum * heightf32) as usize,
+			(led.vscan.maximum * heightf32) as usize,
+			(led.hscan.minimum * widthf32) as usize,
+			(led.hscan.maximum * widthf32) as usize);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
-				let i = 2 * PIXEL_SIZE * (row * self.width + col);
+				let i = SKIP_PIXELS * PIXEL_SIZE * (row * self.width + col);
 				// println!("b val: {}", self.data[i]);
 				b_sum += self.data[i] as u64;
 				g_sum += self.data[i+1] as u64;
@@ -156,9 +166,9 @@ impl Capturer {
 		}
 	}
 
-	// Replaces the selfs frame, returning it. This is not a problem in and by itself, only,
+	// Replaces the selfs frame, returning it. This is not a problem in and by itself, only
 	// the pointer for the vector in the frame is also used at other locations, the vector may
-	// therefore be unexpectedly modified
+	// therefore be unexpectedly modified. Remember to return replacement when done
 	unsafe fn replace_frame(&mut self, replacement: Frame) -> Frame {
 		mem::replace(&mut self.frame, replacement)
 	}
@@ -178,53 +188,21 @@ fn init_dxgi() {
 	unsafe { init(); }
 }
 
-// (x1, y1), (x2, y2)
-struct Led((f32, f32), (f32, f32));
-
-static LEDS: [Led; 32] = [
-	Led((0.0000, 0.9219), (0.0600, 1.0000)),
-	Led((0.0000, 0.8450), (0.0600, 0.9242)),
-	Led((0.0000, 0.7681), (0.0600, 0.8473)),
-	Led((0.0000, 0.6912), (0.0600, 0.7704)),
-	Led((0.0000, 0.6142), (0.0600, 0.6935)),
-	Led((0.0000, 0.5373), (0.0600, 0.6165)),
-	Led((0.0000, 0.4604), (0.0600, 0.5396)),
-	Led((0.0000, 0.3835), (0.0600, 0.4627)),
-	Led((0.0000, 0.3065), (0.0600, 0.3858)),
-	Led((0.0000, 0.2296), (0.0600, 0.3088)),
-	Led((0.0000, 0.1527), (0.0600, 0.2319)),
-	Led((0.0000, 0.0758), (0.0600, 0.1550)),
-	Led((0.0000, 0.0000), (0.0600, 0.0781)),
-	Led((0.0000, 0.0000), (0.0600, 0.1000)),
-	Led((0.0000, 0.0000), (0.0461, 0.1000)),
-	Led((0.0448, 0.0000), (0.0916, 0.1000)),
-	Led((0.0902, 0.0000), (0.1370, 0.1000)),
-	Led((0.1357, 0.0000), (0.1825, 0.1000)),
-	Led((0.1811, 0.0000), (0.2280, 0.1000)),
-	Led((0.2266, 0.0000), (0.2734, 0.1000)),
-	Led((0.2720, 0.0000), (0.3189, 0.1000)),
-	Led((0.3175, 0.0000), (0.3643, 0.1000)),
-	Led((0.3630, 0.0000), (0.4098, 0.1000)),
-	Led((0.4084, 0.0000), (0.4552, 0.1000)),
-	Led((0.4539, 0.0000), (0.5007, 0.1000)),
-	Led((0.4993, 0.0000), (0.5461, 0.1000)),
-	Led((0.5448, 0.0000), (0.5916, 0.1000)),
-	Led((0.5902, 0.0000), (0.6370, 0.1000)),
-	Led((0.6357, 0.0000), (0.6825, 0.1000)),
-	Led((0.6811, 0.0000), (0.7280, 0.1000)),
-	Led((0.7266, 0.0000), (0.7734, 0.1000)),
-	Led((0.7720, 0.0000), (0.8189, 0.1000)),
-];
-
 fn main() {
 	use CaptureResult::*;
+
+	let config = config::parse_config();
+	let leds = config.leds.as_slice();
+
 	init_dxgi();
+
 	let mut capturer = Capturer::new().unwrap();
 
 	let (width, height) = capturer.output_dimensions();
 	println!("{} x {}", width, height);
 
-	for _ in 0..600u16 {
+	let mut last_frame_time = time::precise_time_s();
+	for _ in 0..300u16 {
 		match capturer.capture_frame() {
 			CrOk => (),
 			// We are probably in fullscreen app with restricted access,
@@ -241,8 +219,9 @@ fn main() {
 
 		let mut shared_frame = Arc::new(frame);
 
-		let out_vals: Vec<_> = LEDS.iter()
+		let out_vals: Vec<_> = leds.iter()
 			.map(|led| {
+				let led = led.clone();
 				let child_frame = shared_frame.clone();
 				Future::spawn(move || child_frame.average_color(led)) })
 			.collect::<Vec<_>>()
@@ -250,9 +229,16 @@ fn main() {
 			.map(|mut guard| guard.get())
 			.collect();
 
-		unsafe { capturer.replace_frame(mem::replace(shared_frame.make_unique(),
-			Frame::new())); }
+		unsafe {
+			capturer.replace_frame(mem::replace(shared_frame.make_unique(),
+			Frame::new()));
+		}
 
-		// println!("{:?}\n", out_vals);
+		let delta_time = time::precise_time_s() - last_frame_time;
+		let time_diff = delta_time - 1.0 / FPS_CAP;
+		if time_diff < 0.0 {
+			timer::sleep(Duration::microseconds(((-time_diff) * 1_000_000.0) as i64));
+		}
+		last_frame_time = time::precise_time_s();
 	}
 }

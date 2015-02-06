@@ -2,3 +2,6 @@
 
 *.lock
 *.dll
+*.exe
+*.dat
+HyperCon.jar
