@@ -62,7 +62,7 @@ extern {
 // pixel size in bytes, B8G8R8A8, DXGI default
 static DXGI_PIXEL_SIZE: usize    = 4;
 static FPS_CAP: f64              = 40.0;
-static SKIP_PIXELS: f32          = 1.0;
+static SKIP_PIXELS: f32          = 2.0;
 static SERIAL_BAUD_RATE: u32     = 115200;
 static SERIAL_PORT: &'static str = "COM3";
 
