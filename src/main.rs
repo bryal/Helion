@@ -1,8 +1,31 @@
+// The MIT License (MIT)
+//
+// Copyright (c) 2015 Johan Johansson
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #![feature(libc, core, std_misc, io, alloc)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
 extern crate time;
+extern crate "serial-rust" as serial;
 
 use config::Led;
 
@@ -20,12 +43,28 @@ use libc::{uint8_t,
 
 mod config;
 
-// B8G8R8A8, DXGI default, pixel size in bytes
-static PIXEL_SIZE: usize = 4;
+#[link(name = "DXGCap")]
+extern {
+	fn init();
 
-static FPS_CAP: f64 = 30.0;
+	fn create_dxgi_manager() -> *mut c_void;
 
-static SKIP_PIXELS: usize = 3;
+	fn delete_dxgi_manager(dxgi_manager: *mut c_void);
+
+	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
+		height: *mut size_t);
+
+	// Returns whether succeded
+	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
+		o_bytes: *mut *mut uint8_t) -> uint8_t;
+}
+
+// pixel size in bytes, B8G8R8A8, DXGI default
+static DXGI_PIXEL_SIZE: usize    = 4;
+static FPS_CAP: f64              = 40.0;
+static SKIP_PIXELS: f32          = 1.0;
+static SERIAL_BAUD_RATE: u32     = 115200;
+static SERIAL_PORT: &'static str = "COM3";
 
 enum CaptureResult {
 	CrOk,
@@ -55,22 +94,6 @@ impl AsCaptureResult for uint8_t {
 	}
 }
 
-#[link(name = "DXGCap")]
-extern {
-	fn init();
-
-	fn create_dxgi_manager() -> *mut c_void;
-
-	fn delete_dxgi_manager(dxgi_manager: *mut c_void);
-
-	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
-		height: *mut size_t);
-
-	// Returns whether succeded
-	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
-		o_bytes: *mut *mut uint8_t) -> uint8_t;
-}
-
 #[derive(Clone, Debug)]
 struct RGB8 {
 	red: u8,
@@ -94,15 +117,15 @@ impl Frame {
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
 		// Skip every second row and column for better performance, with not too much
 		// signal loss for most monitors
-		let (widthf32, heightf32) = ((self.width/SKIP_PIXELS) as f32,
-			(self.height/SKIP_PIXELS) as f32);
+		let (widthf32, heightf32) = (self.width as f32 / SKIP_PIXELS,
+			self.height as f32 / SKIP_PIXELS);
 		let (start_y, end_y, start_x, end_x) = ((led.vscan.minimum * heightf32) as usize,
 			(led.vscan.maximum * heightf32) as usize,
 			(led.hscan.minimum * widthf32) as usize,
 			(led.hscan.maximum * widthf32) as usize);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
-				let i = SKIP_PIXELS * PIXEL_SIZE * (row * self.width + col);
+				let i = (SKIP_PIXELS * (DXGI_PIXEL_SIZE * (row * self.width + col)) as f32) as usize;
 				// println!("b val: {}", self.data[i]);
 				b_sum += self.data[i] as u64;
 				g_sum += self.data[i+1] as u64;
@@ -122,14 +145,13 @@ struct Capturer {
 }
 
 impl Capturer {
-	fn new() -> Result<Capturer, ()> {
+	fn new() -> Capturer {
 		let manager = unsafe { create_dxgi_manager() };
 		if manager.is_null() {
-			Err(())
+			panic!("Unexpected null pointer when constructing Capturer.")
 		} else {
-			Ok(Capturer{
-				dxgi_manager: manager,
-				frame: Frame { width: 0, height: 0, data: Vec::new() }})
+			Capturer{ dxgi_manager: manager,
+				frame: Frame { width: 0, height: 0, data: Vec::new() }}
 		}
 	}
 
@@ -189,20 +211,51 @@ fn init_dxgi() {
 }
 
 fn main() {
+	use std::io::Write;
 	use CaptureResult::*;
 
+	
+
+	// Initiate windows stuff that DXGI through DXGCap requires.
+	init_dxgi();
+
+	// Create and open the serial connection to the LEDstream device, e.g. an arduino
+	let mut serial_con = serial::Connection::new(SERIAL_PORT.to_string(), SERIAL_BAUD_RATE);
+	serial_con.open().unwrap();
+
+	// Parse the HyperCon json config
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
 
-	init_dxgi();
+	// Initialize the output led pixel buffer
+	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
+	// which is still alot, but if in the future someone comes with 65'535+ leds, this will
+	// become a problem
+	let n_leds              = leds.len() as u16;
+	let pixel_size          = 3; // RGBA8 => 3 bytes
+	let header_size         = 6; // See header init right below
+	let mut buffer: Vec<u8> =
+		(0 .. (header_size + n_leds as usize * pixel_size)).map(|_| 0).collect();
 
-	let mut capturer = Capturer::new().unwrap();
+	// A special header / magic word is expected by the corresponding LED streaming code 
+	// running on the Arduino. This only needs to be initialized once because the number of  
+	// LEDs remains constant.
+	// Magic word. This is the same magic word as the one in the arduino program LEDstream
+	buffer[0] = 'A' as u8;
+	buffer[1] = 'd' as u8;
+	buffer[2] = 'a' as u8;
+	buffer[3] = ((n_leds - 1) >> 8) as u8;          // LED count high byte
+	buffer[4] = ((n_leds - 1) & 0xff) as u8;        // LED count low byte
+	buffer[5] = buffer[3] ^ buffer[4] ^ 0x55; // Checksum
+
+	// Create the screen capturer
+	let mut capturer = Capturer::new();
 
 	let (width, height) = capturer.output_dimensions();
 	println!("{} x {}", width, height);
 
 	let mut last_frame_time = time::precise_time_s();
-	for _ in 0..300u16 {
+	loop {
 		match capturer.capture_frame() {
 			CrOk => (),
 			// We are probably in fullscreen app with restricted access,
@@ -215,11 +268,14 @@ fn main() {
 			CrFail => continue,
 		}
 
+		// Temporarily take ownership of the frame so we can Arc it for the following
+		// multithreading with Futures
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
-
 		let mut shared_frame = Arc::new(frame);
 
-		let out_vals: Vec<_> = leds.iter()
+		// Clear the led data from buffer, then populate with new pixels
+		buffer.truncate(header_size);
+		for pixel in leds.iter()
 			.map(|led| {
 				let led = led.clone();
 				let child_frame = shared_frame.clone();
@@ -227,17 +283,28 @@ fn main() {
 			.collect::<Vec<_>>()
 			.into_iter()
 			.map(|mut guard| guard.get())
-			.collect();
-
-		unsafe {
-			capturer.replace_frame(mem::replace(shared_frame.make_unique(),
-			Frame::new()));
+		{
+			buffer.push(pixel.red);
+			buffer.push(pixel.green);
+			buffer.push(pixel.blue);
 		}
 
+		// Write the pixel buffer to the arduino
+		serial_con.write(buffer.as_slice());
+
+		// Return the frame to its rightful owner. This is required since the pointer in
+		// Frame.data is used unsafely by dxgi
+		unsafe {
+			capturer.replace_frame(mem::replace(shared_frame.make_unique(),
+				Frame::new()));
+		}
+
+		// Limit the framerate to `FPS_CAP`. If current frame did not go overtime, sleep
+		// so we won't go too fast.
 		let delta_time = time::precise_time_s() - last_frame_time;
-		let time_diff = delta_time - 1.0 / FPS_CAP;
-		if time_diff < 0.0 {
-			timer::sleep(Duration::microseconds(((-time_diff) * 1_000_000.0) as i64));
+		let overtime = delta_time - 1.0 / FPS_CAP;
+		if overtime < 0.0 {
+			timer::sleep(Duration::microseconds(((-overtime) * 1_000_000.0) as i64));
 		}
 		last_frame_time = time::precise_time_s();
 	}

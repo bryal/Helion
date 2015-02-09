@@ -11,3 +11,6 @@ rustc-serialize = "0.2"
 
 [dependencies.time]
 git = "https://github.com/rust-lang/time"
+
+[dependencies.serial-rust]
+git = "https://github.com/bryal/serial-rust"
