@@ -62,12 +62,11 @@ extern {
 		o_bytes: *mut *mut uint8_t) -> uint8_t;
 }
 
-// pixel size in bytes, B8G8R8A8, DXGI default
-static DXGI_PIXEL_SIZE: usize    = 4;
-static FPS_CAP: f64              = 60.0;
-static SKIP_PIXELS: f32          = 3.0;
+static DXGI_PIXEL_SIZE: u64      = 4; // BGRA8 => 4 bytes, DXGI default
 static SERIAL_BAUD_RATE: u32     = 115200;
 static SERIAL_PORT: &'static str = "COM3";
+static OUT_PIXEL_SIZE: usize     = 3; // RGB8 => 3 bytes, what LEDstream expects
+static OUT_HEADER_SIZE: usize    = 6; // Magic word + led count + checksum, 6 bytes
 
 fn init_dxgi() {
 	unsafe { init(); }
@@ -119,8 +118,8 @@ impl RGB8 {
 
 #[derive(Clone)]
 struct Frame {
-	width: usize,
-	height: usize,
+	width: u64,
+	height: u64,
 	data: Vec<u8>,
 }
 
@@ -129,20 +128,21 @@ impl Frame {
 		Frame{ width: 0, height: 0, data: Vec::new() }
 	}
 
-	fn average_color(&self, led: Led) -> RGB8 {
+	fn average_color(&self, led: Led, resize_width: u64, resize_height: u64) -> RGB8 {
+		let (resize_width_ratio, resize_height_ratio) = (
+			(self.width as f32 / resize_width as f32),
+			(self.height as f32 / resize_height as f32));
+		let (start_y, end_y, start_x, end_x) = (
+			(led.vscan.minimum * resize_height as f32) as u64,
+			(led.vscan.maximum * resize_height as f32) as u64,
+			(led.hscan.minimum * resize_width as f32) as u64,
+			(led.hscan.maximum * resize_width as f32) as u64);
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-		// Skip every second row and column for better performance, with not too much
-		// signal loss for most monitors
-		let (widthf32, heightf32) = (self.width as f32 / SKIP_PIXELS,
-			self.height as f32 / SKIP_PIXELS);
-		let (start_y, end_y, start_x, end_x) = ((led.vscan.minimum * heightf32) as usize,
-			(led.vscan.maximum * heightf32) as usize,
-			(led.hscan.minimum * widthf32) as usize,
-			(led.hscan.maximum * widthf32) as usize);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
-				let i = (SKIP_PIXELS * (DXGI_PIXEL_SIZE * (row * self.width + col)) as f32) as usize;
-				// println!("b val: {}", self.data[i]);
+				let i = (DXGI_PIXEL_SIZE as f32 *
+					(row as f32 * resize_height_ratio * self.width as f32 +
+						col as f32 * resize_width_ratio)) as usize;
 				b_sum += self.data[i] as u64;
 				g_sum += self.data[i+1] as u64;
 				r_sum += self.data[i+2] as u64;
@@ -171,10 +171,10 @@ impl Capturer {
 		}
 	}
 
-	fn output_dimensions(&self) -> (usize, usize) {
+	fn output_dimensions(&self) -> (u64, u64) {
 		let (mut width, mut height): (size_t, size_t) = (0, 0);
 		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
-		(width as usize, height as usize)
+		(width, height)
 	}
 
 	fn capture_frame(&mut self) -> CaptureResult {
@@ -229,6 +229,26 @@ fn gamma(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 		((b as f32 / 255.0).powf(1.9) * 235.0) as u8)
 }
 
+fn init_pixel_buffer(n_leds: u16) -> Vec<u8> {
+	// Initialize the output led pixel buffer
+	let mut buffer: Vec<u8> =
+		(0 .. (OUT_HEADER_SIZE + n_leds as usize * OUT_PIXEL_SIZE)).map(|_| 0).collect();
+
+	// A special header / magic word is expected by the corresponding LED streaming code 
+	// running on the Arduino. This only needs to be initialized once because the number of  
+	// LEDs remains constant.
+	// Magic word. This is the same magic word as the one in the arduino program LEDstream
+	buffer[0] = 'A' as u8;
+	buffer[1] = 'd' as u8;
+	buffer[2] = 'a' as u8;
+	// In the two below, not sure why the -1 in `(n_leds - 1)` is needed,
+	// but that's how LEDstream on the Arduino expects it
+	buffer[3] = ((n_leds - 1) >> 8) as u8;    // LED count high byte
+	buffer[4] = ((n_leds - 1) & 0xff) as u8;  // LED count low byte
+	buffer[5] = buffer[3] ^ buffer[4] ^ 0x55; // Checksum
+	buffer
+}
+
 fn main() {
 	use std::io::Write;
 	use CaptureResult::*;
@@ -238,7 +258,6 @@ fn main() {
 
 	// BUG: The `serial::Connection::new` below can't be executed after `config::parse_config()`
 	// This will be diagnosed when the `serial` lib recieves better error reporting.
-
 	// Create and open the serial connection to the LEDstream device, e.g. an arduino
 	let mut serial_con = serial::Connection::new(SERIAL_PORT.to_string(), SERIAL_BAUD_RATE);
 	serial_con.open().unwrap();
@@ -246,34 +265,24 @@ fn main() {
 	// Parse the HyperCon json config
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
+	// Dimensions to resize to when analyzing captured frame. Smaller image => faster averaging
+	let (analyze_width, analyze_height) =
+		(config.framegrabber.width, config.framegrabber.height);
+	let fps_limit = config.framegrabber.frequency_Hz;
 
-
-	// Initialize the output led pixel buffer
 	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
 	// which is still alot, but if in the future someone comes with 65'535+ leds, this will
 	// become a problem
-	let n_leds              = leds.len() as u16;
-	let pixel_size          = 3; // RGBA8 => 3 bytes
-	let header_size         = 6; // See header init right below
-	let mut buffer: Vec<u8> =
-		(0 .. (header_size + n_leds as usize * pixel_size)).map(|_| 0).collect();
-
-	// A special header / magic word is expected by the corresponding LED streaming code 
-	// running on the Arduino. This only needs to be initialized once because the number of  
-	// LEDs remains constant.
-	// Magic word. This is the same magic word as the one in the arduino program LEDstream
-	buffer[0] = 'A' as u8;
-	buffer[1] = 'd' as u8;
-	buffer[2] = 'a' as u8;
-	buffer[3] = ((n_leds - 1) >> 8) as u8;          // LED count high byte
-	buffer[4] = ((n_leds - 1) & 0xff) as u8;        // LED count low byte
-	buffer[5] = buffer[3] ^ buffer[4] ^ 0x55; // Checksum
+	let mut out_pixel_buffer = init_pixel_buffer(leds.len() as u16);
 
 	// Create the screen capturer
 	let mut capturer = Capturer::new();
 
 	let (width, height) = capturer.output_dimensions();
-	println!("{} x {}", width, height);
+	println!("Capture dimensions: {} x {}", width, height);
+	println!("Analyze dimensions: {} x {}", analyze_width, analyze_height);
+	println!("Number of leds: {}", leds.len());
+	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 
 	let mut last_frame_time = time::precise_time_s();
 	loop {
@@ -298,40 +307,41 @@ fn main() {
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
 		let mut shared_frame = Arc::new(frame);
 
-		// Clear the led data from buffer, then populate with new pixels
-		buffer.truncate(header_size);
+		// Clear the led data from out_pixel_buffer, then populate with new pixels
+		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
 		for pixel in leds.iter()
 			.map(|led| {
 				let led = led.clone();
 				let child_frame = shared_frame.clone();
-				Future::spawn(move || child_frame.average_color(led)) })
+				Future::spawn(move ||child_frame.average_color(led, analyze_width,
+					analyze_height)) })
 			.collect::<Vec<_>>()
 			.into_iter()
 			.map(|mut guard| guard.get())
 			.map(|mut rgb| { rgb.modify(&gamma); rgb })
 		{
-			buffer.push(pixel.red);
-			buffer.push(pixel.green);
-			buffer.push(pixel.blue);
+			out_pixel_buffer.push(pixel.red);
+			out_pixel_buffer.push(pixel.green);
+			out_pixel_buffer.push(pixel.blue);
 		}
 
 		// Write the pixel buffer to the arduino
-		serial_con.write(buffer.as_slice());
+		serial_con.write(out_pixel_buffer.as_slice());
 
 		// Return the frame to its rightful owner. This is required since the pointer in
 		// Frame.data is used unsafely by dxgi
 		unsafe {
-			capturer.replace_frame(mem::replace(shared_frame.make_unique(),
-				Frame::new()));
+			capturer.replace_frame(
+				mem::replace(shared_frame.make_unique(), Frame::new()));
 		}
 
-		// Limit the framerate to `FPS_CAP`. If current frame did not go overtime, sleep
+		// Limit the framerate to `fps_limit`. If current frame did not go overtime, sleep
 		// so we won't go too fast.
 		let now = time::precise_time_s();
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.
 		let delta_time = now - last_frame_time;
-		let overtime = -(delta_time.max(0.0) - 1.0 / FPS_CAP);
+		let overtime = -(delta_time.max(0.0) - 1.0 / fps_limit);
 		if overtime > 0.0 {
 			timer::sleep(Duration::microseconds((overtime * 1_000_000.0) as i64));
 		}
