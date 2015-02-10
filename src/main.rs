@@ -20,7 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#![feature(libc, core, std_misc, io, alloc)]
+// TODO: Saturation manipulation by converting to HSV
+
+#![feature(libc, core, std_misc, io, alloc, unboxed_closures)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -31,6 +33,7 @@ use config::Led;
 
 use std::ptr;
 use std::mem;
+use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
@@ -61,10 +64,14 @@ extern {
 
 // pixel size in bytes, B8G8R8A8, DXGI default
 static DXGI_PIXEL_SIZE: usize    = 4;
-static FPS_CAP: f64              = 40.0;
-static SKIP_PIXELS: f32          = 2.0;
+static FPS_CAP: f64              = 60.0;
+static SKIP_PIXELS: f32          = 3.0;
 static SERIAL_BAUD_RATE: u32     = 115200;
 static SERIAL_PORT: &'static str = "COM3";
+
+fn init_dxgi() {
+	unsafe { init(); }
+}
 
 enum CaptureResult {
 	CrOk,
@@ -99,6 +106,15 @@ struct RGB8 {
 	red: u8,
 	green: u8,
 	blue: u8
+}
+impl RGB8 {
+	fn modify(&mut self, f: &Fn<(u8, u8, u8), Output=(u8, u8, u8)>) -> &mut Self {
+		let r = f(self.red, self.green, self.blue);
+		self.red = r.0;
+		self.green = r.1;
+		self.blue = r.2;
+		self
+	}
 }
 
 #[derive(Clone)]
@@ -206,18 +222,22 @@ impl Drop for Capturer {
 	}
 }
 
-fn init_dxgi() {
-	unsafe { init(); }
+// Higher gamma -> Same lights, darker darks
+fn gamma(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+	(((r as f32 / 255.0).powf(1.6) * 255.0) as u8,
+		((g as f32 / 255.0).powf(2.0) * 220.0) as u8,
+		((b as f32 / 255.0).powf(1.9) * 235.0) as u8)
 }
 
 fn main() {
 	use std::io::Write;
 	use CaptureResult::*;
 
-	
-
 	// Initiate windows stuff that DXGI through DXGCap requires.
 	init_dxgi();
+
+	// BUG: The `serial::Connection::new` below can't be executed after `config::parse_config()`
+	// This will be diagnosed when the `serial` lib recieves better error reporting.
 
 	// Create and open the serial connection to the LEDstream device, e.g. an arduino
 	let mut serial_con = serial::Connection::new(SERIAL_PORT.to_string(), SERIAL_BAUD_RATE);
@@ -226,6 +246,7 @@ fn main() {
 	// Parse the HyperCon json config
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
+
 
 	// Initialize the output led pixel buffer
 	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
@@ -258,14 +279,18 @@ fn main() {
 	loop {
 		match capturer.capture_frame() {
 			CrOk => (),
-			// We are probably in fullscreen app with restricted access,
-			// sleep until we have access again
-			CrAccessDenied => timer::sleep(Duration::seconds(2)),
-			// Has already been handeled in DXGCap, just try again
-			CrAccessLost => continue,
-			CrTimeout => continue,
-			// CrFail. Might be bad, might be no big deal. Just ignore for now
-			CrFail => continue,
+			// Access Denied means we are probably in fullscreen app with restricted 
+			// access, sleep until we have access again
+			CrAccessDenied => {
+				println!("Access Denied");
+				timer::sleep(Duration::seconds(2))
+			},
+			// Access Lost is handled automatically in DXGCap, Timeout is no biggie,
+			// Fail might be bad, but might also not.
+			// For all of these, just reuse the previous frame
+			CrAccessLost => println!("Access to desktop duplication lost"),
+			CrTimeout => (),
+			CrFail => println!("Unexpected failure when capturing screen"),
 		}
 
 		// Temporarily take ownership of the frame so we can Arc it for the following
@@ -283,6 +308,7 @@ fn main() {
 			.collect::<Vec<_>>()
 			.into_iter()
 			.map(|mut guard| guard.get())
+			.map(|mut rgb| { rgb.modify(&gamma); rgb })
 		{
 			buffer.push(pixel.red);
 			buffer.push(pixel.green);
@@ -301,10 +327,13 @@ fn main() {
 
 		// Limit the framerate to `FPS_CAP`. If current frame did not go overtime, sleep
 		// so we won't go too fast.
-		let delta_time = time::precise_time_s() - last_frame_time;
-		let overtime = delta_time - 1.0 / FPS_CAP;
-		if overtime < 0.0 {
-			timer::sleep(Duration::microseconds(((-overtime) * 1_000_000.0) as i64));
+		let now = time::precise_time_s();
+		// `precise_time_s` will reset every now and then. To handle this, substitute
+		// `delta_time` for zero if it is negative.
+		let delta_time = now - last_frame_time;
+		let overtime = -(delta_time.max(0.0) - 1.0 / FPS_CAP);
+		if overtime > 0.0 {
+			timer::sleep(Duration::microseconds((overtime * 1_000_000.0) as i64));
 		}
 		last_frame_time = time::precise_time_s();
 	}
