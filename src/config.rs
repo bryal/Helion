@@ -34,9 +34,10 @@ use rustc_serialize::{json, Decoder, Decodable};
 /// colorOrder: The order of the color bytes ('rgb', 'rbg', 'bgr', etc.).
 #[derive(Clone)]
 struct DeviceConfig {
-	type_: String,
-	rate: u32,
-	color_order: String
+	pub type_: String,
+	pub rate: u32,
+	pub output: String,
+	pub color_order: String
 }
 impl Decodable for DeviceConfig {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<DeviceConfig, D::Error> {
@@ -46,6 +47,9 @@ impl Decodable for DeviceConfig {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
 				rate: match d.read_struct_field("rate", 1us, Decodable::decode) {
+					Ok(v) => v,
+					Err(e) => return Err(e) },
+				output: match d.read_struct_field("output", 0us, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
 				color_order: match d.read_struct_field("colorOrder", 2us,
@@ -157,7 +161,7 @@ struct FrameGrabber {
 #[derive(RustcDecodable, Clone)]
 struct LedsConfig  {
 	// Device configuration. This only really applies on the RPi, so might never be used.
-	device: DeviceConfig,
+	pub device: DeviceConfig,
 	/// Color manipulation configuration used to tune the output colors to specific
 	/// surroundings. The configuration contains a list of color-transforms.
 	pub color: ColorsManipulation,

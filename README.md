@@ -11,13 +11,13 @@ Config must be located in the current working directory, which is same as where 
 
 Notes about config sections:
 
-* `Device`: This mostly applies to the Raspberry Pi. Nothing is read.
+* `Device`: `Output` is serial port to use, e.g. "COM2" on windows. `Baudrate` is rate to use when sending pixel buffer to Arduino, LEDstream expects this to be 115200. `Type` is not read, but must be one where `Output` and `Baudrate` fields exist.
 
 * `Construction`: Led placement. Everything is read.
 
 * `Image Process`: Led capture areas. Blackborder stuff not read.
 
-* `Frame Grabber`: **REQUIRED**. Width and height decides to what resolution frame is resized when analyzing colors, smaller is faster. Interval decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
+* `Frame Grabber`: **REQUIRED**. `Width` and `Height` decides to what resolution frame is resized when analyzing colors, smaller is faster. If either is 0, use native resolution. `Interval` decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
 
 # Building
 Dependencies:

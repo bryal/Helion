@@ -63,8 +63,6 @@ extern {
 }
 
 static DXGI_PIXEL_SIZE: u64      = 4; // BGRA8 => 4 bytes, DXGI default
-static SERIAL_BAUD_RATE: u32     = 115200;
-static SERIAL_PORT: &'static str = "COM3";
 static OUT_PIXEL_SIZE: usize     = 3; // RGB8 => 3 bytes, what LEDstream expects
 static OUT_HEADER_SIZE: usize    = 6; // Magic word + led count + checksum, 6 bytes
 
@@ -256,12 +254,6 @@ fn main() {
 	// Initiate windows stuff that DXGI through DXGCap requires.
 	init_dxgi();
 
-	// BUG: The `serial::Connection::new` below can't be executed after `config::parse_config()`
-	// This will be diagnosed when the `serial` lib recieves better error reporting.
-	// Create and open the serial connection to the LEDstream device, e.g. an arduino
-	let mut serial_con = serial::Connection::new(SERIAL_PORT.to_string(), SERIAL_BAUD_RATE);
-	serial_con.open().unwrap();
-
 	// Parse the HyperCon json config
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
@@ -270,6 +262,11 @@ fn main() {
 		(config.framegrabber.width, config.framegrabber.height);
 	let fps_limit = config.framegrabber.frequency_Hz;
 
+	// Create and open the serial connection to the LEDstream device, e.g. an arduino
+	let mut serial_con =
+		serial::Connection::new(config.device.output.clone(), config.device.rate);
+	serial_con.open().unwrap();
+
 	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
 	// which is still alot, but if in the future someone comes with 65'535+ leds, this will
 	// become a problem
@@ -277,10 +274,12 @@ fn main() {
 
 	// Create the screen capturer
 	let mut capturer = Capturer::new();
-
 	let (width, height) = capturer.output_dimensions();
+
 	println!("Capture dimensions: {} x {}", width, height);
 	println!("Analyze dimensions: {} x {}", analyze_width, analyze_height);
+	println!("Serial port: \"{}\", Baud rate: {}",
+		config.device.output.clone(), config.device.rate);
 	println!("Number of leds: {}", leds.len());
 	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 
