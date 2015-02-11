@@ -145,7 +145,9 @@ impl Frame {
 		Frame{ width: 0, height: 0, data: Vec::new() }
 	}
 
-	fn average_color(&self, led: Led, resize_width: u64, resize_height: u64) -> RGB8 {
+	fn average_color(&self, led: Led, mut resize_width: u64, mut resize_height: u64) -> RGB8 {
+		if resize_width == 0 { resize_width = self.width; }
+		if resize_height == 0 { resize_height = self.height; }
 		let (resize_width_ratio, resize_height_ratio) = (
 			(self.width as f32 / resize_width as f32),
 			(self.height as f32 / resize_height as f32));
