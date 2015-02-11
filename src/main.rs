@@ -20,32 +20,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// TODO: Saturation manipulation by converting to HSV
-
-#![feature(libc, core, std_misc, io, alloc, unboxed_closures, box_syntax)]
+#![feature(libc, core, std_misc, io, alloc, unboxed_closures, box_syntax, path)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
 extern crate time;
 extern crate "serial-rust" as serial;
 
-use config::{Led, parse_led_indices};
-
 use std::ptr;
 use std::mem;
-use std::cmp::{max, min, partial_min};
 use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
 use std::sync::Arc;
 use std::sync::Future;
-
 use libc::{uint8_t, 
 	c_void,
 	size_t};
 
+use config::{Led, parse_led_indices};
+use color::{RGB8, RgbTransformer, Pixel};
+
 mod config;
+mod color;
 
 #[link(name = "DXGCap")]
 extern {
@@ -62,9 +60,6 @@ extern {
 	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
 		o_bytes: *mut *mut uint8_t) -> uint8_t;
 }
-
-type ColorTransformerConfig = config::Transform;
-type HSVTransformer = config::HSV;
 
 static DXGI_PIXEL_SIZE: u64      = 4; // BGRA8 => 4 bytes, DXGI default
 static OUT_PIXEL_SIZE: usize     = 3; // RGB8 => 3 bytes, what LEDstream expects
@@ -103,140 +98,6 @@ impl AsCaptureResult for uint8_t {
 }
 
 #[derive(Clone)]
-struct RgbTransformer<'a> {
-	red: &'a config::ColorSettings,
-	green: &'a config::ColorSettings,
-	blue: &'a config::ColorSettings
-}
-
-// No modulo in rust, % is remainder
-fn modulo(l: f32, r: f32) -> f32 {
-	if l >= 0.0 {
-		l % r
-	} else {
-		r + l % r
-	}
-}
-
-trait Pixel {
-	fn to_rgb(&self) -> RGB;
-	fn to_hsv(&self) -> HSV;
-
-	fn rgb_transform(&self, rgb_transformer: &RgbTransformer) -> RGB {
-		let rgb = self.to_rgb();
-		let mut colors = [rgb.red, rgb.green, rgb.blue];
-		let transformers = [
-			&rgb_transformer.red,
-			&rgb_transformer.green,
-			&rgb_transformer.blue];
-
-		for (color, transformer) in colors.iter_mut().zip(transformers.iter()) {
-			let c = (*color as f32 / 255.0).powf(transformer.gamma) *
-				transformer.whitelevel *
-				(1.0 - transformer.blacklevel) + transformer.blacklevel;
-			*color = (if c >= transformer.threshold { c } else { 0.0 } *
-				255.0) as u8;
-		}
-		RGB{red: colors[0], green: colors[1], blue: colors[2]}
-	}
-
-	fn hsv_transform(&self, transformer: &HSVTransformer) -> HSV {
-		let hsv = self.to_hsv();
-		HSV{hue: hsv.hue,
-			saturation: partial_min(1.0, hsv.saturation * transformer.saturationGain)
-				.unwrap_or(1.0),
-			value: partial_min(1.0, hsv.value * transformer.valueGain).unwrap_or(1.0)}
-	}
-}
-
-#[derive(Clone, Debug)]
-struct RGB {
-	red: u8,
-	green: u8,
-	blue: u8
-}
-impl RGB {
-	fn new() -> RGB {
-		RGB{red: 0, green: 0, blue: 0}
-	}
-}
-impl Pixel for RGB {
-	fn to_rgb(&self) -> RGB {
-		self.clone()
-	}
-
-	fn to_hsv(&self) -> HSV {
-		let max = max(max(self.red, self.green), self.blue);
-		let min = min(min(self.red, self.green), self.blue);
-		let chroma = max - min;
-
-		let hue = 1.0/6.0 * if chroma == 0 {
-			0.0
-		} else if max == self.red {
-			modulo((self.green as f32 - self.blue as f32) / chroma as f32, 6.0)
-		} else if max == self.green {
-			((self.blue as f32 - self.red as f32) / chroma as f32) + 2.0
-		} else {
-			((self.red as f32 - self.green as f32) / chroma as f32) + 4.0
-		};
-
-		let value = max;
-
-		let saturation = if value == 0 {
-			0.0
-		} else {
-			chroma as f32 / value as f32
-		};
-
-		HSV{hue: hue, saturation: saturation, value: value as f32 / 255.0}
-	}
-}
-
-#[derive(Clone, Debug)]
-struct HSV {
-	hue: f32,
-	saturation: f32,
-	value: f32
-}
-impl HSV {
-	fn new() -> HSV {
-		HSV{hue: 0.0, saturation: 0.0,  value: 0.0}
-	}
-}
-impl Pixel for HSV {
-	fn to_rgb(&self) -> RGB {
-		if self.saturation == 0.0 {
-			let v = (self.value * 255.0) as u8;
-			RGB{red: v, green: v, blue: v}
-		} else {
-			let sector_f = self.hue * 6.0;
-			let sector = sector_f as u8;
-			let factorial_part = sector_f - sector as f32;
-			let val_255 = self.value * 255.0;
-			let v_8bit = val_255 as u8;
-
-			let p = (val_255 * (1.0 - self.saturation)) as u8;
-			let q = (val_255 * (1.0 - self.saturation * factorial_part)) as u8;
-			let t = (val_255 * (1.0 - self.saturation * (1.0 - factorial_part))) as u8;
-			
-			let (r, g, b) = match sector {
-				0 => (v_8bit, t, p),
-				1 => (q, v_8bit, p),
-				2 => (p, v_8bit, t),
-				3 => (p, q, v_8bit),
-				4 => (t, p, v_8bit),
-				_ => (v_8bit, p, q),
-			};
-			RGB{red: r, green: g, blue: b}
-		}
-	}
-
-	fn to_hsv(&self) -> HSV {
-		self.clone()
-	}
-}
-
-#[derive(Clone)]
 struct Frame {
 	width: u64,
 	height: u64,
@@ -248,7 +109,7 @@ impl Frame {
 		Frame{ width: 0, height: 0, data: Vec::new() }
 	}
 
-	fn average_color(&self, led: Led, mut resize_width: u64, mut resize_height: u64) -> RGB {
+	fn average_color(&self, led: Led, mut resize_width: u64, mut resize_height: u64) -> RGB8 {
 		if resize_width == 0 { resize_width = self.width; }
 		if resize_height == 0 { resize_height = self.height; }
 		let (resize_width_ratio, resize_height_ratio) = (
@@ -272,8 +133,9 @@ impl Frame {
 		}
 
 		let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
-		RGB{ red: (r_sum/n_of_pixels) as u8, green: (g_sum/n_of_pixels) as u8,
-			blue: (b_sum/n_of_pixels) as u8 }
+		RGB8{r: (r_sum/n_of_pixels) as u8,
+			g: (g_sum/n_of_pixels) as u8,
+			b: (b_sum/n_of_pixels) as u8 }
 	}
 }
 
@@ -378,7 +240,7 @@ fn main() {
 		.map(|_| Vec::with_capacity(2))
 		.collect::<Vec<_>>();
 
-	// Add transforms from config to each led
+	// Add transforms from config to each led in matching vec
 	for transform_conf in config.color.transform.iter() {
 		let hsv_transformer = if !transform_conf.hsv.is_default() {
 			Some(&transform_conf.hsv)
@@ -388,8 +250,9 @@ fn main() {
 			&& transform_conf.green.is_default()
 			&& transform_conf.red.is_default())
 		{
-			Some(RgbTransformer{red: &transform_conf.red, green: &transform_conf.green,
-				blue: &transform_conf.blue})
+			Some(RgbTransformer{r: &transform_conf.red,
+				g: &transform_conf.green,
+				b: &transform_conf.blue})
 		} else { None };
 
 		for range in parse_led_indices(transform_conf.leds.as_slice(), leds.len()).iter() {
@@ -424,7 +287,6 @@ fn main() {
 	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 	
 	let mut last_frame_time = time::precise_time_s();
-
 	loop {
 		match capturer.capture_frame() {
 			CrOk => (),
@@ -449,7 +311,7 @@ fn main() {
 
 		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
 
-		for pixel in leds.iter()
+		for rgb_pixel in leds.iter()
 			.map(|led| {
 				let led = led.clone();
 				let child_frame = shared_frame.clone();
@@ -474,9 +336,9 @@ fn main() {
 						}})
 				.to_rgb())
 		{
-			out_pixel_buffer.push(pixel.red);
-			out_pixel_buffer.push(pixel.green);
-			out_pixel_buffer.push(pixel.blue);
+			out_pixel_buffer.push(rgb_pixel.r);
+			out_pixel_buffer.push(rgb_pixel.g);
+			out_pixel_buffer.push(rgb_pixel.b);
 		}
 
 		serial_con.write(out_pixel_buffer.as_slice());

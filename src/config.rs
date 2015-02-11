@@ -27,8 +27,6 @@ use std::ops::Range;
 
 use rustc_serialize::{json, Decoder, Decodable};
 
-// TODO: fix snake cases
-
 /// type:       The type of the device or leds (known types for now are 'ws2801', 'ldp8806',
 ///             'lpd6803', 'sedu', 'adalight', 'lightpack', 'test' and 'none')
 /// rate:       The baudrate of the output to the device
