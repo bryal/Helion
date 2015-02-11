@@ -56,23 +56,23 @@
 				"red" :
 				{
 					"threshold"  : 0.0000,
-					"gamma"      : 1.0000,
+					"gamma"      : 1.2000,
 					"blacklevel" : 0.0000,
 					"whitelevel" : 1.0000
 				},
 				"green" :
 				{
 					"threshold"  : 0.0000,
-					"gamma"      : 1.0000,
+					"gamma"      : 1.9000,
 					"blacklevel" : 0.0000,
-					"whitelevel" : 1.0000
+					"whitelevel" : 0.8000
 				},
 				"blue" :
 				{
 					"threshold"  : 0.0000,
-					"gamma"      : 1.0000,
+					"gamma"      : 1.6000,
 					"blacklevel" : 0.0000,
-					"whitelevel" : 1.0000
+					"whitelevel" : 0.9000
 				}
 			}
 		],

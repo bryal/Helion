@@ -98,6 +98,14 @@ impl AsCaptureResult for uint8_t {
 	}
 }
 
+#[derive(Clone)]
+struct RgbTransformer {
+	hsv: config::HSV,
+	red: config::ColorSettings,
+	green: config::ColorSettings,
+	blue: config::ColorSettings
+}
+
 #[derive(Clone, Debug)]
 struct RGB8 {
 	red: u8,
@@ -105,12 +113,23 @@ struct RGB8 {
 	blue: u8
 }
 impl RGB8 {
-	fn modify(&mut self, f: &Fn<(u8, u8, u8), Output=(u8, u8, u8)>) -> &mut Self {
-		let r = f(self.red, self.green, self.blue);
-		self.red = r.0;
-		self.green = r.1;
-		self.blue = r.2;
-		self
+	fn new() -> RGB8 {
+		RGB8{red: 0, green: 0, blue: 0}
+	}
+
+	// Transform the pixel using a transformer
+	fn transform(&self, transformer: &RgbTransformer) -> Self {
+		let (tr, tg, tb) = (&transformer.red, &transformer.green, &transformer.blue);
+		// Transform the gamma
+		let w_gamma = RGB8{
+			red: ((self.red as f32 / 255.0).powf(tr.gamma) * 255.0 * tr.whitelevel)
+				as u8,
+			green: ((self.green as f32 / 255.0).powf(tg.gamma) * 255.0 * tg.whitelevel)
+				as u8,
+			blue: ((self.blue as f32 / 255.0).powf(tb.gamma) * 255.0 * tb.whitelevel)
+				as u8,
+		};
+		w_gamma
 	}
 }
 
@@ -220,15 +239,7 @@ impl Drop for Capturer {
 	}
 }
 
-// Higher gamma -> Same lights, darker darks
-fn gamma(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-	(((r as f32 / 255.0).powf(1.6) * 255.0) as u8,
-		((g as f32 / 255.0).powf(2.0) * 220.0) as u8,
-		((b as f32 / 255.0).powf(1.9) * 235.0) as u8)
-}
-
 fn init_pixel_buffer(n_leds: u16) -> Vec<u8> {
-	// Initialize the output led pixel buffer
 	let mut buffer: Vec<u8> =
 		(0 .. (OUT_HEADER_SIZE + n_leds as usize * OUT_PIXEL_SIZE)).map(|_| 0).collect();
 
@@ -251,18 +262,38 @@ fn main() {
 	use std::io::Write;
 	use CaptureResult::*;
 
-	// Initiate windows stuff that DXGI through DXGCap requires.
+	// Initiate windows stuff that DXGCap requires.
 	init_dxgi();
 
 	// Parse the HyperCon json config
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
+
+	let mut leds_with_transforms = leds.iter()
+		.map(|led| (led.clone(), Vec::with_capacity(2)))
+		.collect::<Vec<_>>();
+
+	// Add transforms from config to each led
+	for c_transform in config.color.transform.iter() {
+		let transform = RgbTransformer{hsv: c_transform.hsv.clone(),
+			red: c_transform.red.clone(),
+			green: c_transform.green.clone(),
+			blue: c_transform.blue.clone()};
+		for range in 
+			config::parse_led_indices(c_transform.leds.as_slice(), leds.len())
+			.iter()
+		{
+			for ledtran in leds_with_transforms[*range].iter_mut() {
+				(ledtran.1).push(transform.clone());
+			}
+		}
+	}
+
 	// Dimensions to resize to when analyzing captured frame. Smaller image => faster averaging
 	let (analyze_width, analyze_height) =
 		(config.framegrabber.width, config.framegrabber.height);
 	let fps_limit = config.framegrabber.frequency_Hz;
 
-	// Create and open the serial connection to the LEDstream device, e.g. an arduino
 	let mut serial_con =
 		serial::Connection::new(config.device.output.clone(), config.device.rate);
 	serial_con.open().unwrap();
@@ -272,7 +303,6 @@ fn main() {
 	// become a problem
 	let mut out_pixel_buffer = init_pixel_buffer(leds.len() as u16);
 
-	// Create the screen capturer
 	let mut capturer = Capturer::new();
 	let (width, height) = capturer.output_dimensions();
 
@@ -306,36 +336,38 @@ fn main() {
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
 		let mut shared_frame = Arc::new(frame);
 
-		// Clear the led data from out_pixel_buffer, then populate with new pixels
 		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
-		for pixel in leds.iter()
-			.map(|led| {
+		for pixel in leds_with_transforms.iter()
+			.map(|&(ref led, ref transformers)| {
 				let led = led.clone();
 				let child_frame = shared_frame.clone();
-				Future::spawn(move ||child_frame.average_color(led, analyze_width,
-					analyze_height)) })
+				(
+					Future::spawn(move ||
+						child_frame.average_color(led, analyze_width,
+							analyze_height)),
+					transformers)
+
+			})
 			.collect::<Vec<_>>()
 			.into_iter()
-			.map(|mut guard| guard.get())
-			.map(|mut rgb| { rgb.modify(&gamma); rgb })
+			.map(|(mut pixel_guard, transformers)| transformers.iter()
+				.fold(pixel_guard.get(), |mut pixel, transformer|
+					pixel.transform(transformer)))
 		{
 			out_pixel_buffer.push(pixel.red);
 			out_pixel_buffer.push(pixel.green);
 			out_pixel_buffer.push(pixel.blue);
 		}
 
-		// Write the pixel buffer to the arduino
 		serial_con.write(out_pixel_buffer.as_slice());
 
 		// Return the frame to its rightful owner. This is required since the pointer in
-		// Frame.data is used unsafely by dxgi
+		// Frame.data is used unsafely by DXGCap
 		unsafe {
 			capturer.replace_frame(
 				mem::replace(shared_frame.make_unique(), Frame::new()));
 		}
 
-		// Limit the framerate to `fps_limit`. If current frame did not go overtime, sleep
-		// so we won't go too fast.
 		let now = time::precise_time_s();
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.

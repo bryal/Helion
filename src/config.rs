@@ -23,6 +23,7 @@
 #![allow(dead_code, non_snake_case)]
 
 use std::old_io::File;
+use std::ops::Range;
 
 use rustc_serialize::{json, Decoder, Decodable};
 
@@ -41,9 +42,9 @@ struct DeviceConfig {
 }
 impl Decodable for DeviceConfig {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<DeviceConfig, D::Error> {
-        	decoder.read_struct("DeviceConfig", 3us, |d|
-        		Result::Ok(DeviceConfig{
-        			type_: match d.read_struct_field("type", 0us, Decodable::decode) {
+		decoder.read_struct("DeviceConfig", 3us, |d|
+			Result::Ok(DeviceConfig{
+				type_: match d.read_struct_field("type", 0us, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
 				rate: match d.read_struct_field("rate", 1us, Decodable::decode) {
@@ -63,9 +64,9 @@ impl Decodable for DeviceConfig {
 /// saturationGain: The gain adjustement of the saturation
 /// valueGain:      The gain adjustement of the value
 #[derive(RustcDecodable, Clone)]
-struct HSV {
-	saturationGain: f32,
-	valueGain: f32,
+pub struct HSV {
+	pub saturationGain: f32,
+	pub valueGain: f32,
 }
 
 /// threshold:  The minimum required input value for the channel to be on (else zero)
@@ -73,11 +74,11 @@ struct HSV {
 /// blacklevel: The lowest possible value (when the channel is black)
 /// whitelevel: The highest possible value (when the channel is white)
 #[derive(RustcDecodable, Clone)]
-struct ColorSettings {
-	threshold: f32,
-	gamma: f32,
-	blacklevel: f32,
-	whitelevel: f32
+pub struct ColorSettings {
+	pub threshold: f32,
+	pub gamma: f32,
+	pub blacklevel: f32,
+	pub whitelevel: f32
 }
 
 /// leds:           The indices (or index ranges) of the leds to which this color transform applies
@@ -86,11 +87,11 @@ struct ColorSettings {
 /// red/green/blue: The manipulation in the Red-Green-Blue color domain
 #[derive(RustcDecodable, Clone)]
 struct Transform {
-	leds: String,
-	hsv: HSV,
-	red: ColorSettings,
-	green: ColorSettings,
-	blue: ColorSettings
+	pub leds: String,
+	pub hsv: HSV,
+	pub red: ColorSettings,
+	pub green: ColorSettings,
+	pub blue: ColorSettings
 }
 
 /// type:            The type of smoothing algorithm ('linear' or 'none')
@@ -194,5 +195,31 @@ pub fn parse_config() -> LedsConfig {
 				https://github.com/bryal/Helion");
 			panic!("{}", e)
 		}
+	}
+}
+
+pub fn parse_led_indices(indices_str: &str, total_n_leds: usize) -> Vec<Range<usize>> {
+	if indices_str == "*" {
+		vec![0..total_n_leds]
+	} else {
+		indices_str.split(',')
+			.map(|index_str| index_str.trim().split('-').collect::<Vec<_>>())
+			.filter(|is| is.len() <= 2 && is.len() >= 1)
+			.filter_map(|index_strs| match index_strs.len() {
+				1 => if let Ok(i) = index_strs[0].parse::<usize>() {
+					Some(i..(i + 1))
+				} else {
+					None
+				},
+				2 => if let (Ok(i), Ok(j)) = (index_strs[0].parse::<usize>(),
+					index_strs[1].parse::<usize>())
+				{
+					Some(i..(j + 1))
+				} else {
+					None
+				},
+				_ => None
+			})
+			.collect()
 	}
 }

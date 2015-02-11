@@ -19,6 +19,13 @@ Notes about config sections:
 
 * `Frame Grabber`: **REQUIRED**. `Width` and `Height` decides to what resolution frame is resized when analyzing colors, smaller is faster. If either is 0, use native resolution. `Interval` decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
 
+* `Smoothing`: Nothing yet!
+
+* `Colors`: Color transformations. Works: multiple transformations, custom led indices, Gamma, and Whitelvl.
+
+There are no plans to add support for anything under the `External` tab. That stuff is really just for Raspberry Pis with XBMC and stuff.
+
+
 # Building
 Dependencies:
 ```
