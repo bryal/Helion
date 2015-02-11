@@ -68,6 +68,11 @@ pub struct HSV {
 	pub saturationGain: f32,
 	pub valueGain: f32,
 }
+impl HSV {
+	pub fn is_default(&self) -> bool {
+		self.saturationGain == 1.0 && self.valueGain == 1.0
+	}
+}
 
 /// threshold:  The minimum required input value for the channel to be on (else zero)
 /// gamma:      The gamma-curve correction factor
@@ -80,13 +85,21 @@ pub struct ColorSettings {
 	pub blacklevel: f32,
 	pub whitelevel: f32
 }
+impl ColorSettings {
+	pub fn is_default(&self) -> bool {
+		self.threshold == 0.0
+			&& self.gamma == 1.0
+			&& self.blacklevel == 0.0
+			&& self.whitelevel == 1.0
+	}
+}
 
 /// leds:           The indices (or index ranges) of the leds to which this color transform applies
 ///                 (eg '0-5, 9, 11, 12-17'). The indices are zero based.
 /// hsv:            The manipulation in the Hue-Saturation-Value color domain
 /// red/green/blue: The manipulation in the Red-Green-Blue color domain
 #[derive(RustcDecodable, Clone)]
-struct Transform {
+pub struct Transform {
 	pub leds: String,
 	pub hsv: HSV,
 	pub red: ColorSettings,

@@ -21,7 +21,7 @@ Notes about config sections:
 
 * `Smoothing`: Nothing yet!
 
-* `Colors`: Color transformations. Works: multiple transformations, custom led indices, Gamma, and Whitelvl.
+* `Colors`: Everythign is read. If the RGB section or HSV section is left with default values, that section will be skipped for small performance gain.
 
 There are no plans to add support for anything under the `External` tab. That stuff is really just for Raspberry Pis with XBMC and stuff.
 
