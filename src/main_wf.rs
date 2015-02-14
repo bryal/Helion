@@ -34,8 +34,7 @@ use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
-use std::sync::Arc;
-use std::sync::Future;
+use std::sync::{Arc, Future};
 use libc::{uint8_t, 
 	c_void,
 	size_t};
@@ -155,29 +154,29 @@ impl Frame {
 		self.update_process_ratio();
 	}
 
-	fn average_color(&self, led: &Led) -> RGB8 {
-		// TODO: Precaltulate stuff
-		let (start_y, end_y, start_x, end_x) = (
-			(led.vscan.minimum * self.resize_height as f32) as usize,
-			(led.vscan.maximum * self.resize_height as f32) as usize,
-			(led.hscan.minimum * self.resize_width as f32) as usize,
-			(led.hscan.maximum * self.resize_width as f32) as usize);
-		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-		for row in start_y..end_y {
-			for col in start_x..end_x {
-				let i = (row as f32 * self.resize_height_ratio * self.width as f32
-						+ col as f32 * self.resize_width_ratio) as usize;
-				r_sum += self.data[i].r as u64;
-				g_sum += self.data[i].g as u64;
-				b_sum += self.data[i].b as u64;
-			}
-		}
+	// fn average_color(&self, led: &Led) -> RGB8 {
+	// 	// TODO: Precaltulate stuff
+	// 	let (start_y, end_y, start_x, end_x) = (
+	// 		(led.vscan.minimum * self.resize_height as f32) as usize,
+	// 		(led.vscan.maximum * self.resize_height as f32) as usize,
+	// 		(led.hscan.minimum * self.resize_width as f32) as usize,
+	// 		(led.hscan.maximum * self.resize_width as f32) as usize);
+	// 	let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
+	// 	for row in start_y..end_y {
+	// 		for col in start_x..end_x {
+	// 			let i = (row as f32 * self.resize_height_ratio * self.width as f32
+	// 					+ col as f32 * self.resize_width_ratio) as usize;
+	// 			r_sum += self.data[i].r as u64;
+	// 			g_sum += self.data[i].g as u64;
+	// 			b_sum += self.data[i].b as u64;
+	// 		}
+	// 	}
 
-		let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
-		RGB8{r: (r_sum/n_of_pixels) as u8,
-			g: (g_sum/n_of_pixels) as u8,
-			b: (b_sum/n_of_pixels) as u8 }
-	}
+	// 	let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
+	// 	RGB8{r: (r_sum/n_of_pixels) as u8,
+	// 		g: (g_sum/n_of_pixels) as u8,
+	// 		b: (b_sum/n_of_pixels) as u8 }
+	// }
 }
 
 struct Capturer {
@@ -236,9 +235,9 @@ impl Capturer {
 		}
 	}
 
-	// Replaces the selfs frame, returning it. This is not a problem in and by itself, only
+	// Replaces the frame of `self`, returning it. This is not a problem in and by itself, only
 	// the pointer for the vector in the frame is also used at other locations, the vector may
-	// therefore be unexpectedly modified. Remember to return replacement when done
+	// therefore be unexpectedly modified. Remember to re-replace frame when done
 	unsafe fn replace_frame(&mut self, replacement: Frame) -> Frame {
 		mem::replace(&mut self.frame, replacement)
 	}
@@ -251,6 +250,100 @@ impl Drop for Capturer {
 			mem::forget(v);
 			delete_dxgi_manager(self.dxgi_manager);
 		}
+	}
+}
+
+#[derive(Clone)]
+struct FrameIndicesMaps {
+	// Parent frame width and height, to verify when resolutions change
+	frame_width: usize,
+	frame_height: usize,
+	// Instead of calculating pixel locations to analyze each frame,
+	// just look them up in a precalculated map
+	maps: Vec<Vec<usize>>
+}
+
+#[derive(Clone)]
+struct FrameProcessor {
+	frame: Option<Frame>,
+	leds: Vec<Led>,
+	indices_maps: FrameIndicesMaps
+}
+impl FrameProcessor {
+	fn new() -> FrameProcessor {
+		FrameProcessor{ frame: None, leds: Vec::new(), indices_maps:
+			FrameIndicesMaps{ frame_width: 0, frame_height: 0,
+				maps: Vec::new() } }
+	}
+
+	fn update_led_region_maps(&mut self) {
+		let frame = if let Some(ref frame) = self.frame {
+			frame
+		} else {
+			return
+		};
+		self.indices_maps.maps.clear();
+		for led in self.leds.iter() {
+			self.indices_maps.maps.push({
+				let (y1, y2, x1, x2) = (
+					(led.vscan.minimum * frame.resize_height as f32) as usize,
+					(led.vscan.maximum * frame.resize_height as f32) as usize,
+					(led.hscan.minimum * frame.resize_width as f32) as usize,
+					(led.hscan.maximum * frame.resize_width as f32) as usize);
+				let n_indices = (y2 - y1) * (x2 - x2);
+				(y1..y2).fold(Vec::with_capacity(n_indices), |mut acc, row| {
+					acc.extend((x1..x2).map(|col|
+						(row as f32 * frame.resize_height_ratio
+							* frame.width as f32 + col as f32
+							* frame.resize_width_ratio) as usize));
+					acc
+				})
+			})
+		}
+	}
+
+	fn set_leds(&mut self, leds: Vec<Led>) {
+		self.leds = leds;
+		self.update_led_region_maps();
+	}
+
+	fn insert_frame(&mut self, frame: Frame) -> Option<Frame> {
+		let new_resolution = frame.width != self.indices_maps.frame_width
+			|| frame.height != self.indices_maps.frame_height;
+		let old_frame = mem::replace(&mut self.frame, Some(frame));
+		if new_resolution {
+			self.update_led_region_maps();
+		}
+		old_frame
+	}
+
+	fn take_frame(&mut self) -> Frame {
+		if let Some(frame) = mem::replace(&mut self.frame, None) {
+			frame
+		} else {
+			panic!("FrameProcessor: Tried to remove frame from slot, \
+				but none was inserted.")
+		}
+	}
+
+	fn average_color(&self, led_index: usize) -> RGB8 {
+		let frame = if let Some(ref frame) = self.frame {
+			frame
+		} else {
+			panic!("FrameProcessor: Tried process frame when none was inserted")
+		};
+
+		let indices = self.indices_maps.maps[led_index].as_slice();
+		let (r_sum, g_sum, b_sum) = indices.iter()
+			.fold((0u64, 0u64, 0u64), |(rs, gs, bs), &i|
+				(rs + frame.data[i].r as u64,
+					gs + frame.data[i].g as u64,
+					bs + frame.data[i].b as u64));
+
+		let n_pixels = indices.len() as u64;
+		RGB8{r: (r_sum/n_pixels) as u8,
+			g: (g_sum/n_pixels) as u8,
+			b: (b_sum/n_pixels) as u8 }
 	}
 }
 
@@ -282,11 +375,15 @@ fn main() {
 
 	// Parse the HyperCon json config
 	let config = config::parse_config();
+
+	let mut serial_con =
+		serial::Connection::new(config.device.output.clone(), config.device.rate);
+	serial_con.open().unwrap();
+
 	let leds = config.leds.as_slice();
 
 	let mut led_transformers: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
-
-	// Add transforms from config to each led in matching vec
+	// Add transforms from config to each led in matching vec `led_transformers`
 	for transform_conf in config.color.transform.iter() {
 		let hsv_transformer = if !transform_conf.hsv.is_default() {
 			Some(&transform_conf.hsv)
@@ -308,10 +405,6 @@ fn main() {
 		}
 	}
 
-	let mut serial_con =
-		serial::Connection::new(config.device.output.clone(), config.device.rate);
-	serial_con.open().unwrap();
-
 	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
 	// which is still alot, but if in the future someone comes with 65'535+ leds, this will
 	// become a problem
@@ -322,6 +415,9 @@ fn main() {
 	let resize_dimensions = (config.framegrabber.width, config.framegrabber.height);
 	capturer.frame.set_resize_dimensions(resize_dimensions);
 
+	let mut frame_processor = Arc::new(FrameProcessor::new());
+	frame_processor.make_unique().set_leds(leds.to_vec());
+
 	let fps_limit = config.framegrabber.frequency_Hz;
 
 	println!("Capture dimensions: {:?}", capturer.get_output_dimensions());
@@ -331,9 +427,6 @@ fn main() {
 	println!("Number of leds: {}", leds.len());
 	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 	
-	// In order for serial writing not to block, do the writing in a Future. This required the
-	// output buffer to be moved, so return it from the Future.
-	let mut write_future = Future::from_value((serial_con, out_pixel_buffer));
 	let mut last_frame_time = time::precise_time_s();
 	let mut last_diag_time = last_frame_time;
 	let mut diag_i = 0;
@@ -360,19 +453,13 @@ fn main() {
 		// Temporarily take ownership of the frame so we can Arc it for the following
 		// multithreading with Futures
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
-		let mut shared_frame = Arc::new(frame);
+		frame_processor.make_unique().insert_frame(frame);
 
-		let write_tuple = write_future.into_inner();
-		serial_con = write_tuple.0;
-		out_pixel_buffer = write_tuple.1;
-		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
+		for rgb_pixel in (0..frame_processor.leds.len())
+			.map(|led_i| {
+				let child_frame_proc = frame_processor.clone();
 
-		for rgb_pixel in leds.iter()
-			.map(|led| {
-				let led = led.clone();
-				let child_frame = shared_frame.clone();
-
-				Future::spawn(move || child_frame.average_color(&led))
+				Future::spawn(move || child_frame_proc.average_color(led_i))
 			})
 			.zip(led_transformers.iter())
 			.map(|(mut pixel_guard, transformers)| transformers.iter()
@@ -397,17 +484,16 @@ fn main() {
 		}
 
 		let diag_aap = time::precise_time_s();
+		let diag_bw = diag_aap;
 
-		write_future = Future::spawn(move || {
-			serial_con.write(out_pixel_buffer.as_slice());
-			(serial_con, out_pixel_buffer)
-		});
+		serial_con.write(out_pixel_buffer.as_slice());
+
+		let diag_aw = time::precise_time_s();
 
 		// Return the frame to its rightful owner. This is required since the pointer in
 		// Frame.data is used unsafely by DXGCap
 		unsafe {
-			capturer.replace_frame(
-				mem::replace(shared_frame.make_unique(), Frame::new()));
+			capturer.replace_frame(frame_processor.make_unique().take_frame());
 		}
 
 		// `precise_time_s` will reset every now and then. To handle this, substitute
@@ -423,9 +509,12 @@ fn main() {
 		if diag_i >= 60 {
 			println!("cf fps: {}", 1.0 / (diag_acf-diag_bcf));
 			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
+			println!("aw fps: {}", 1.0 / (diag_aw-diag_bw));
 			println!("avg fps: {}\n", 1.0 / ((last_frame_time - last_diag_time) / 60.0));
 			diag_i = 0;
 			last_diag_time = last_frame_time;
 		}
+
+		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
 	}
 }

@@ -289,8 +289,8 @@
 	///   * frequency_Hz : The frequency of the frame grab [Hz]
 	"framegrabber" : 
 	{
-		"width" : 960,
-		"height" : 360,
+		"width" : 1280,
+		"height" : 720,
 		"frequency_Hz" : 60.0
 	},
 
