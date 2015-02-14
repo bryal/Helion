@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#![feature(libc, core, std_misc, io, alloc, unboxed_closures, box_syntax, path)]
+#![feature(libc, core, std_misc, io, unboxed_closures, box_syntax, path)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -34,7 +34,6 @@ use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
-use std::sync::Arc;
 use std::sync::Future;
 use libc::{uint8_t, 
 	c_void,
@@ -235,13 +234,6 @@ impl Capturer {
 			cr
 		}
 	}
-
-	// Replaces the selfs frame, returning it. This is not a problem in and by itself, only
-	// the pointer for the vector in the frame is also used at other locations, the vector may
-	// therefore be unexpectedly modified. Remember to return replacement when done
-	unsafe fn replace_frame(&mut self, replacement: Frame) -> Frame {
-		mem::replace(&mut self.frame, replacement)
-	}
 }
 
 impl Drop for Capturer {
@@ -356,27 +348,19 @@ fn main() {
 		}
 		let diag_acf = time::precise_time_s();
 		let diag_bap = diag_acf;
-		
-		// Temporarily take ownership of the frame so we can Arc it for the following
-		// multithreading with Futures
-		let frame = unsafe { capturer.replace_frame(Frame::new()) };
-		let mut shared_frame = Arc::new(frame);
 
-		let write_tuple = write_future.into_inner();
-		serial_con = write_tuple.0;
-		out_pixel_buffer = write_tuple.1;
+		match write_future.into_inner() {
+			(sc, buf) => { serial_con = sc; out_pixel_buffer = buf; }
+		}
 		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
 
 		for rgb_pixel in leds.iter()
 			.map(|led| {
-				let led = led.clone();
-				let child_frame = shared_frame.clone();
-
-				Future::spawn(move || child_frame.average_color(&led))
+				capturer.frame.average_color(&led)
 			})
 			.zip(led_transformers.iter())
-			.map(|(mut pixel_guard, transformers)| transformers.iter()
-				.fold(box pixel_guard.get() as Box<Pixel>,
+			.map(|(pixel_future, transformers)| transformers.iter()
+				.fold(box pixel_future as Box<Pixel>,
 					|mut pixel, &(ref opt_rgb_tr, ref opt_hsv_tr)| {
 						if let &Some(ref rgb_tr) = opt_rgb_tr {
 							pixel = (box pixel.rgb_transform(rgb_tr))
@@ -402,13 +386,6 @@ fn main() {
 			serial_con.write(out_pixel_buffer.as_slice());
 			(serial_con, out_pixel_buffer)
 		});
-
-		// Return the frame to its rightful owner. This is required since the pointer in
-		// Frame.data is used unsafely by DXGCap
-		unsafe {
-			capturer.replace_frame(
-				mem::replace(shared_frame.make_unique(), Frame::new()));
-		}
 
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.
