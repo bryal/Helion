@@ -18,7 +18,8 @@ Notes about config sections:
 
 * `Image Process`: Led capture areas. Blackborder stuff not read.
 
-* `Frame Grabber`: **REQUIRED**. `Width` and `Height` decides to what resolution frame is resized when analyzing colors, smaller is faster. If either is 0, use native resolution. `Interval` decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
+* `Frame Grabber`: **REQUIRED**. `Width` and `Height` decides to what resolution frame is resized when analyzing colors, smaller is faster. Works best if dimensions are divisors of the native resolution. If either is 0, use native resolution.
+`Interval` decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
 
 * `Smoothing`: Nothing yet!
 

@@ -98,12 +98,22 @@ impl AsCaptureResult for uint8_t {
 	}
 }
 
+// Must contain only the fields [b, g, r, a] in that order, since this struct is transmuted to from
+// DXGCap raw BGRA8 buffer.
+#[derive(Clone)]
+struct BGRA8 {
+	b: u8,
+	g: u8,
+	r: u8,
+	a: u8
+}
+
 #[derive(Clone)]
 struct Frame {
 	width: usize, height: usize,
 	resize_width: usize, resize_height: usize,
 	resize_width_ratio: f32, resize_height_ratio: f32,
-	data: Vec<u8>,
+	data: Vec<BGRA8>,
 }
 
 impl Frame {
@@ -115,12 +125,19 @@ impl Frame {
 
 	fn update_process_ratio(&mut self) {
 		self.resize_width_ratio = self.width as f32 / self.resize_width as f32;
+		println!("ratio: {}", self.resize_width_ratio);
 		self.resize_height_ratio = self.height as f32 / self.resize_height as f32;
 	}
 
 	fn set_dimensions(&mut self, (width, height): (usize, usize)) {
 		self.width = width;
 		self.height = height;
+		if self.resize_width == 0 {
+			self.resize_width = self.width
+		}
+		if self.resize_height == 0 {
+			self.resize_height = self.height
+		}
 		self.update_process_ratio();
 	}
 
@@ -148,12 +165,11 @@ impl Frame {
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
-				let i = (DXGI_PIXEL_SIZE as f32 *
-					(row as f32 * self.resize_height_ratio * self.width as f32
-						+ col as f32 * self.resize_width_ratio)) as usize;
-				b_sum += self.data[i] as u64;
-				g_sum += self.data[i+1] as u64;
-				r_sum += self.data[i+2] as u64;
+				let i = (row as f32 * self.resize_height_ratio * self.width as f32
+						+ col as f32 * self.resize_width_ratio) as usize;
+				r_sum += self.data[i].r as u64;
+				g_sum += self.data[i].g as u64;
+				b_sum += self.data[i].b as u64;
 			}
 		}
 
@@ -198,13 +214,19 @@ impl Capturer {
 				if buffer.is_null() {
 					CaptureResult::CrFail
 				} else {
-					// New buffer size, frame dimensions ahve changed
+					// New buffer size, frame dimensions have changed
 					let (width, height) = self.get_output_dimensions();
 					self.frame.set_dimensions((width, height));
+					// We don't want raw bytes, so cast them to BGRA8 structs.
+					// BGRA8 contains only 4 fields, b, g, r, and a, and so this
+					// should work fine. Divide size by 4, since each element is
+					// quadruple the size
+					// let rgbs: *mut RGB8 = 
+					let bufsize = (buffer_size / DXGI_PIXEL_SIZE) as usize;
 					self.frame.data = unsafe {
-						Vec::from_raw_parts(buffer,
-							buffer_size as usize,
-							buffer_size as usize)
+						Vec::from_raw_parts(buffer as *mut BGRA8,
+							bufsize,
+							bufsize)
 					};
 					CaptureResult::CrOk
 				}

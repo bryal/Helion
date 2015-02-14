@@ -143,7 +143,7 @@ struct ColorsManipulation {
 	pub smoothing: Smoothing
 }
 
-#[derive(RustcDecodable, Clone, Show)]
+#[derive(RustcDecodable, Clone, Debug)]
 struct LedAxisPosFactor {
 	pub minimum: f32,
 	pub maximum: f32
