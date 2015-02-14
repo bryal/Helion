@@ -143,7 +143,7 @@ struct ColorsManipulation {
 	pub smoothing: Smoothing
 }
 
-#[derive(RustcDecodable, Clone)]
+#[derive(RustcDecodable, Clone, Show)]
 struct LedAxisPosFactor {
 	pub minimum: f32,
 	pub maximum: f32
@@ -153,7 +153,7 @@ struct LedAxisPosFactor {
 ///        (minimum and maximum inclusive)
 /// vscan: The fractional part of the image along the vertical used for the averaging 
 ///        (minimum and maximum inclusive)
-#[derive(RustcDecodable, Clone)]
+#[derive(RustcDecodable, Clone, Debug)]
 pub struct Led {
 	pub hscan: LedAxisPosFactor,
 	pub vscan: LedAxisPosFactor
@@ -164,8 +164,8 @@ pub struct Led {
 /// frequency_Hz: The frequency of the frame grab [Hz]
 #[derive(RustcDecodable, Clone)]
 struct FrameGrabber {
-	pub width: u64,
-	pub height: u64,
+	pub width: usize,
+	pub height: usize,
 	pub frequency_Hz: f64
 }
 

@@ -29,6 +29,7 @@ extern crate "serial-rust" as serial;
 
 use std::ptr;
 use std::mem;
+use std::iter::repeat;
 use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
@@ -56,7 +57,7 @@ extern {
 	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
 		height: *mut size_t);
 
-	// Returns whether succeded
+	// DXGI status code, HRESULT
 	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
 		o_bytes: *mut *mut uint8_t) -> uint8_t;
 }
@@ -99,33 +100,57 @@ impl AsCaptureResult for uint8_t {
 
 #[derive(Clone)]
 struct Frame {
-	width: u64,
-	height: u64,
+	width: usize, height: usize,
+	resize_width: usize, resize_height: usize,
+	resize_width_ratio: f32, resize_height_ratio: f32,
 	data: Vec<u8>,
 }
 
 impl Frame {
 	fn new() -> Frame {
-		Frame{ width: 0, height: 0, data: Vec::new() }
+		Frame{ width: 0, height: 0, resize_width: 0, resize_height: 0,
+			resize_width_ratio: 0.0, resize_height_ratio: 0.0,
+			data: Vec::new() }
 	}
 
-	fn average_color(&self, led: Led, mut resize_width: u64, mut resize_height: u64) -> RGB8 {
-		if resize_width == 0 { resize_width = self.width; }
-		if resize_height == 0 { resize_height = self.height; }
-		let (resize_width_ratio, resize_height_ratio) = (
-			(self.width as f32 / resize_width as f32),
-			(self.height as f32 / resize_height as f32));
+	fn update_process_ratio(&mut self) {
+		self.resize_width_ratio = self.width as f32 / self.resize_width as f32;
+		self.resize_height_ratio = self.height as f32 / self.resize_height as f32;
+	}
+
+	fn set_dimensions(&mut self, (width, height): (usize, usize)) {
+		self.width = width;
+		self.height = height;
+		self.update_process_ratio();
+	}
+
+	fn set_resize_dimensions(&mut self, (resize_width, resize_height): (usize, usize)) {
+		self.resize_width = if resize_width == 0 {
+			self.width
+		} else {
+			resize_width
+		};
+		self.resize_height = if resize_height == 0 {
+			self.height
+		} else {
+			resize_height
+		};
+		self.update_process_ratio();
+	}
+
+	fn average_color(&self, led: &Led) -> RGB8 {
+		// TODO: Precaltulate stuff
 		let (start_y, end_y, start_x, end_x) = (
-			(led.vscan.minimum * resize_height as f32) as u64,
-			(led.vscan.maximum * resize_height as f32) as u64,
-			(led.hscan.minimum * resize_width as f32) as u64,
-			(led.hscan.maximum * resize_width as f32) as u64);
+			(led.vscan.minimum * self.resize_height as f32) as usize,
+			(led.vscan.maximum * self.resize_height as f32) as usize,
+			(led.hscan.minimum * self.resize_width as f32) as usize,
+			(led.hscan.maximum * self.resize_width as f32) as usize);
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
 				let i = (DXGI_PIXEL_SIZE as f32 *
-					(row as f32 * resize_height_ratio * self.width as f32 +
-						col as f32 * resize_width_ratio)) as usize;
+					(row as f32 * self.resize_height_ratio * self.width as f32
+						+ col as f32 * self.resize_width_ratio)) as usize;
 				b_sum += self.data[i] as u64;
 				g_sum += self.data[i+1] as u64;
 				r_sum += self.data[i+2] as u64;
@@ -150,15 +175,14 @@ impl Capturer {
 		if manager.is_null() {
 			panic!("Unexpected null pointer when constructing Capturer.")
 		} else {
-			Capturer{ dxgi_manager: manager,
-				frame: Frame { width: 0, height: 0, data: Vec::new() }}
+			Capturer{ dxgi_manager: manager, frame: Frame::new() }
 		}
 	}
 
-	fn output_dimensions(&self) -> (u64, u64) {
+	fn get_output_dimensions(&self) -> (usize, usize) {
 		let (mut width, mut height): (size_t, size_t) = (0, 0);
 		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
-		(width, height)
+		(width as usize, height as usize)
 	}
 
 	fn capture_frame(&mut self) -> CaptureResult {
@@ -171,15 +195,17 @@ impl Capturer {
 			if buffer as *const _ == self.frame.data.as_ptr() {
 				CaptureResult::CrOk
 			} else {
-				let buffer_size = buffer_size as usize;
 				if buffer.is_null() {
 					CaptureResult::CrFail
 				} else {
-					let (width, height) = self.output_dimensions();
-					self.frame = Frame{ width: width, height: height,
-						data: unsafe {
-							Vec::from_raw_parts(buffer, buffer_size,
-								buffer_size) }};
+					// New buffer size, frame dimensions ahve changed
+					let (width, height) = self.get_output_dimensions();
+					self.frame.set_dimensions((width, height));
+					self.frame.data = unsafe {
+						Vec::from_raw_parts(buffer,
+							buffer_size as usize,
+							buffer_size as usize)
+					};
 					CaptureResult::CrOk
 				}
 			}
@@ -236,9 +262,7 @@ fn main() {
 	let config = config::parse_config();
 	let leds = config.leds.as_slice();
 
-	let mut led_transformers = (0 .. leds.len())
-		.map(|_| Vec::with_capacity(2))
-		.collect::<Vec<_>>();
+	let mut led_transformers: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
 
 	// Add transforms from config to each led in matching vec
 	for transform_conf in config.color.transform.iter() {
@@ -262,11 +286,6 @@ fn main() {
 		}
 	}
 
-	// Dimensions to resize to when analyzing captured frame. Smaller image => faster averaging
-	let (analyze_width, analyze_height) =
-		(config.framegrabber.width, config.framegrabber.height);
-	let fps_limit = config.framegrabber.frequency_Hz;
-
 	let mut serial_con =
 		serial::Connection::new(config.device.output.clone(), config.device.rate);
 	serial_con.open().unwrap();
@@ -277,17 +296,24 @@ fn main() {
 	let mut out_pixel_buffer = init_pixel_buffer(leds.len() as u16);
 
 	let mut capturer = Capturer::new();
-	let (width, height) = capturer.output_dimensions();
+	// Dimensions to resize to when processing captured frame. Smaller image => faster averaging
+	let resize_dimensions = (config.framegrabber.width, config.framegrabber.height);
+	capturer.frame.set_resize_dimensions(resize_dimensions);
 
-	println!("Capture dimensions: {} x {}", width, height);
-	println!("Analyze dimensions: {} x {}", analyze_width, analyze_height);
+	let fps_limit = config.framegrabber.frequency_Hz;
+
+	println!("Capture dimensions: {:?}", capturer.get_output_dimensions());
+	println!("Analyze dimensions: {:?}", resize_dimensions);
 	println!("Serial port: \"{}\", Baud rate: {}",
 		config.device.output.clone(), config.device.rate);
 	println!("Number of leds: {}", leds.len());
 	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 	
 	let mut last_frame_time = time::precise_time_s();
+	let mut last_diag_time = last_frame_time;
+	let mut diag_i = 0;
 	loop {
+		let diag_bcf = time::precise_time_s();
 		match capturer.capture_frame() {
 			CrOk => (),
 			// Access Denied means we are probably in fullscreen app with restricted 
@@ -303,23 +329,22 @@ fn main() {
 			CrTimeout => (),
 			CrFail => println!("Unexpected failure when capturing screen"),
 		}
-
+		let diag_acf = time::precise_time_s();
+		let diag_bap = diag_acf;
+		
 		// Temporarily take ownership of the frame so we can Arc it for the following
 		// multithreading with Futures
 		let frame = unsafe { capturer.replace_frame(Frame::new()) };
 		let mut shared_frame = Arc::new(frame);
 
 		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
-
 		for rgb_pixel in leds.iter()
 			.map(|led| {
 				let led = led.clone();
 				let child_frame = shared_frame.clone();
 
-				Future::spawn(move || child_frame.average_color(led, analyze_width,
-					analyze_height))})
-			.collect::<Vec<_>>()
-			.into_iter()
+				Future::spawn(move || child_frame.average_color(&led))
+			})
 			.zip(led_transformers.iter())
 			.map(|(mut pixel_guard, transformers)| transformers.iter()
 				.fold(box pixel_guard.get() as Box<Pixel>,
@@ -333,15 +358,21 @@ fn main() {
 								as Box<Pixel>
 						} else {
 							pixel
-						}})
-				.to_rgb())
+						}
+					})
+				.to_rgb())	
 		{
 			out_pixel_buffer.push(rgb_pixel.r);
 			out_pixel_buffer.push(rgb_pixel.g);
 			out_pixel_buffer.push(rgb_pixel.b);
 		}
 
+		let diag_aap = time::precise_time_s();
+		let diag_bw = diag_aap;
+
 		serial_con.write(out_pixel_buffer.as_slice());
+
+		let diag_aw = time::precise_time_s();
 
 		// Return the frame to its rightful owner. This is required since the pointer in
 		// Frame.data is used unsafely by DXGCap
@@ -350,14 +381,23 @@ fn main() {
 				mem::replace(shared_frame.make_unique(), Frame::new()));
 		}
 
-		let now = time::precise_time_s();
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.
-		let delta_time = now - last_frame_time;
+		let delta_time = time::precise_time_s() - last_frame_time;
 		let overtime = -(delta_time.max(0.0) - 1.0 / fps_limit);
 		if overtime > 0.0 {
 			timer::sleep(Duration::microseconds((overtime * 1_000_000.0) as i64));
 		}
 		last_frame_time = time::precise_time_s();
+
+		diag_i += 1;
+		if diag_i >= 60 {
+			println!("cf fps: {}", 1.0 / (diag_acf-diag_bcf));
+			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
+			println!("aw fps: {}", 1.0 / (diag_aw-diag_bw));
+			println!("avg fps: {}\n", 1.0 / ((last_frame_time - last_diag_time) / 60.0));
+			diag_i = 0;
+			last_diag_time = last_frame_time;
+		}
 	}
 }
