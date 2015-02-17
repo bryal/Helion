@@ -1,7 +1,10 @@
+use super::config;
+
 use std::cmp::{max, min, partial_min};
 use std::num::Float;
+use std::mem;
 
-use super::config;
+static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects
 
 type ColorTransformerConfig = config::Transform;
 type HSVTransformer = config::HSV;
@@ -127,5 +130,41 @@ impl Pixel for HSV {
 
 	fn to_hsv(&self) -> HSV {
 		self.clone()
+	}
+}
+
+pub fn rgbs_to_bytes(mut v: Vec<RGB8>) -> Vec<u8> {
+	unsafe {
+		let new_len = v.len() * RGB_SIZE;
+		v.set_len(new_len);
+		mem::transmute(v)
+	}
+}
+
+pub fn bytes_to_rgbs(v: Vec<u8>) -> Vec<RGB8> {
+	unsafe {
+		let new_len = v.len() / RGB_SIZE;
+		let mut v_o: Vec<RGB8> = mem::transmute(v);
+		v_o.set_len(new_len);
+		v_o
+	}
+}
+
+// Smoothing functions for color transitions
+pub fn no_smooth(_: &RGB8, to: RGB8, _: f64) -> RGB8 {
+	to
+}
+pub fn linear_smooth(from: &RGB8, to: RGB8, factor: f64) -> RGB8 {
+	if factor > 1.0 {
+		to
+	} else {
+		let (r_diff, g_diff, b_diff) = (to.r as f64 - from.r as f64,
+			to.g as f64 - from.g as f64,
+			to.b as f64 - from.b as f64);
+
+		RGB8{ r: from.r + (r_diff * factor) as u8,
+			g: from.g + (g_diff * factor) as u8,
+			b: from.b + (b_diff * factor) as u8,
+		}
 	}
 }
