@@ -1,11 +1,12 @@
 language: rust
 
-after_success: |
-    cargo doc && \
-    echo '<meta http-equiv=refresh content=0;url=Helion/index.html>' > target/doc/index.html && \
-    sudo pip install ghp-import && \
-    ghp-import -n target/doc && \
-    git push -qf https://${$GH_TOKEN}@github.com/bryal/Helion.git gh-pages
+install: sudo pip install ghp-import
+
+script:
+  - cargo doc
+  - echo '<meta http-equiv=refresh content=0;url=Helion/index.html>' > target/doc/index.html
+  - ghp-import -n target/doc
+  - git push -qf https://${$GH_TOKEN}@github.com/bryal/Helion.git gh-pages
 
 env:
     global:
