@@ -278,6 +278,22 @@ fn linear_smooth(from: u8, to: u8, factor: f64) -> u8 {
 	}
 }
 
+struct FrameTimer {
+	prev_t: f64,
+	delta_t: f64,
+}
+impl FrameTimer {
+	fn new() -> FrameTimer {
+		FrameTimer{ prev_t: time::precise_time_s(), delta_t: 0.0}
+	}
+
+	fn tick(&mut self) {
+		let now = time::precise_time_s();
+		self.delta_t = now - self.prev_t;
+		self.prev_t = now;
+	}
+}
+
 fn main() {
 	use std::io::Write;
 	use CaptureResult::*;
@@ -330,18 +346,10 @@ fn main() {
 	};
 
 	let mut capturer = Capturer::new();
-	// Dimensions to resize to when processing captured frame. Smaller image => faster averaging
 	let resize_dimensions = (config.framegrabber.width, config.framegrabber.height);
 	capturer.frame.set_resize_dimensions(resize_dimensions);
 
 	let fps_limit = config.framegrabber.frequency_Hz;
-
-	println!("Capture dimensions: {:?}", capturer.get_output_dimensions());
-	println!("Analyze dimensions: {:?}", resize_dimensions);
-	println!("Serial port: \"{}\", Baud rate: {}",
-		config.device.output.clone(), config.device.rate);
-	println!("Number of leds: {}", leds.len());
-	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
 
 	// Function to use when smoothing led colors
 	let smooth = match config.color.smoothing.type_.as_slice() {
@@ -349,8 +357,9 @@ fn main() {
 		_ => no_smooth as fn(u8, u8, f64) -> u8,
 	};
 	let smooth_time_const = max(config.color.smoothing.time_ms, 1) as f64 / 1000.0;
-	let mut last_frame_time = time::precise_time_s();
-	let mut last_diag_time = last_frame_time;
+	
+	let mut frame_timer = FrameTimer::new();
+	let mut diag_timer = FrameTimer::new();
 	let mut diag_i = 0;
 	loop {
 		let diag_bcf = time::precise_time_s();
@@ -374,7 +383,7 @@ fn main() {
 
 		let (mut serial_con, mut out_pixel_buf) = write_future.into_inner();
 
-		let smooth_factor = (time::precise_time_s() - last_frame_time) / smooth_time_const;
+		let smooth_factor = frame_timer.delta_t / smooth_time_const;
 		for (rgb_pixel, buf_i) in leds.iter()
 			.map(|led| {
 				capturer.frame.average_color(&led)
@@ -414,20 +423,19 @@ fn main() {
 
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.
-		let delta_time = time::precise_time_s() - last_frame_time;
-		let overtime = -(delta_time.max(0.0) - 1.0 / fps_limit);
+		frame_timer.tick();
+		let overtime = -(frame_timer.delta_t.max(0.0) - 1.0 / fps_limit);
 		if overtime > 0.0 {
 			timer::sleep(Duration::microseconds((overtime * 1_000_000.0) as i64));
 		}
-		last_frame_time = time::precise_time_s();
 
 		diag_i += 1;
 		if diag_i >= 60 {
+			diag_timer.tick();
 			println!("cf fps: {}", 1.0 / (diag_acf-diag_bcf));
 			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
-			println!("avg fps: {}\n", 1.0 / ((last_frame_time - last_diag_time) / 60.0));
+			println!("avg fps: {}\n", 1.0 / (diag_timer.delta_t / 60.0));
 			diag_i = 0;
-			last_diag_time = last_frame_time;
 		}
 	}
 }
