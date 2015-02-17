@@ -29,12 +29,13 @@ extern crate "serial-rust" as serial;
 
 use std::ptr;
 use std::mem;
-use std::iter::repeat;
+use std::iter::{repeat, range_step};
 use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
 use std::sync::Future;
+use std::cmp::max;
 use libc::{uint8_t, 
 	c_void,
 	size_t};
@@ -164,8 +165,8 @@ impl Frame {
 		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
 		for row in start_y..end_y {
 			for col in start_x..end_x {
-				let i = (row as f32 * self.resize_height_ratio * self.width as f32
-						+ col as f32 * self.resize_width_ratio) as usize;
+				let i = (row as f32 * self.resize_height_ratio * self.width as f32 +
+					col as f32 * self.resize_width_ratio) as usize;
 				r_sum += self.data[i].r as u64;
 				g_sum += self.data[i].g as u64;
 				b_sum += self.data[i].b as u64;
@@ -216,11 +217,9 @@ impl Capturer {
 					// New buffer size, frame dimensions have changed
 					let (width, height) = self.get_output_dimensions();
 					self.frame.set_dimensions((width, height));
-					// We don't want raw bytes, so cast them to BGRA8 structs.
-					// BGRA8 contains only 4 fields, b, g, r, and a, and so this
-					// should work fine. Divide size by 4, since each element is
-					// quadruple the size
-					// let rgbs: *mut RGB8 = 
+					// Raw bytes are bothersome, so cast them to BGRA8 structs.
+					// BGRA8 contains only 4 fields, b, g, r, and a, and so,
+					// this works fine.
 					let bufsize = (buffer_size / DXGI_PIXEL_SIZE) as usize;
 					self.frame.data = unsafe {
 						Vec::from_raw_parts(buffer as *mut BGRA8,
@@ -247,8 +246,9 @@ impl Drop for Capturer {
 }
 
 fn init_pixel_buffer(n_leds: u16) -> Vec<u8> {
-	let mut buffer: Vec<u8> =
-		(0 .. (OUT_HEADER_SIZE + n_leds as usize * OUT_PIXEL_SIZE)).map(|_| 0).collect();
+	let mut buffer: Vec<u8> = repeat(0)
+		.take(OUT_HEADER_SIZE + n_leds as usize * OUT_PIXEL_SIZE)
+		.collect();
 
 	// A special header / magic word is expected by the corresponding LED streaming code 
 	// running on the Arduino. This only needs to be initialized once because the number of  
@@ -263,6 +263,19 @@ fn init_pixel_buffer(n_leds: u16) -> Vec<u8> {
 	buffer[4] = ((n_leds - 1) & 0xff) as u8;  // LED count low byte
 	buffer[5] = buffer[3] ^ buffer[4] ^ 0x55; // Checksum
 	buffer
+}
+
+// Smoothing functions for color transitions
+fn no_smooth(_: u8, to: u8, _: f64) -> u8 {
+	to
+}
+fn linear_smooth(from: u8, to: u8, factor: f64) -> u8 {
+	if factor > 1.0 {
+		to
+	} else {
+		let diff = to as f64 - from as f64;
+		from + (diff * factor) as u8
+	}
 }
 
 fn main() {
@@ -300,14 +313,21 @@ fn main() {
 		}
 	}
 
-	let mut serial_con =
-		serial::Connection::new(config.device.output.clone(), config.device.rate);
-	serial_con.open().unwrap();
+	let mut write_future = {
+		let mut serial_con =
+			serial::Connection::new(config.device.output.clone(), config.device.rate);
+		serial_con.open().unwrap();
 
-	// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
-	// which is still alot, but if in the future someone comes with 65'535+ leds, this will
-	// become a problem
-	let mut out_pixel_buffer = init_pixel_buffer(leds.len() as u16);
+		// Note, while the `leds.len()` returns a usize, the max supported leds in LEDstream is u16,
+		// which is still alot, but if in the future someone comes with 65'535+ leds, this will
+		// become a problem
+		let out_pixel_buf = init_pixel_buffer(leds.len() as u16);
+
+		// In order for serial writing not to block, do the writing in a Future. This requires stuff
+		// to be moved, so return them from the Future for reuse.
+		// TODO: Consider using Thread::spawn and channels
+		Future::from_value((serial_con, out_pixel_buf))
+	};
 
 	let mut capturer = Capturer::new();
 	// Dimensions to resize to when processing captured frame. Smaller image => faster averaging
@@ -322,10 +342,13 @@ fn main() {
 		config.device.output.clone(), config.device.rate);
 	println!("Number of leds: {}", leds.len());
 	println!("Capture interval: ms: {}, fps: {}", 1000.0 / fps_limit, fps_limit);
-	
-	// In order for serial writing not to block, do the writing in a Future. This required the
-	// output buffer to be moved, so return it from the Future.
-	let mut write_future = Future::from_value((serial_con, out_pixel_buffer));
+
+	// Function to use when smoothing led colors
+	let smooth = match config.color.smoothing.type_.as_slice() {
+		"linear" => linear_smooth as fn(u8, u8, f64) -> u8,
+		_ => no_smooth as fn(u8, u8, f64) -> u8,
+	};
+	let smooth_time_const = max(config.color.smoothing.time_ms, 1) as f64 / 1000.0;
 	let mut last_frame_time = time::precise_time_s();
 	let mut last_diag_time = last_frame_time;
 	let mut diag_i = 0;
@@ -349,12 +372,10 @@ fn main() {
 		let diag_acf = time::precise_time_s();
 		let diag_bap = diag_acf;
 
-		match write_future.into_inner() {
-			(sc, buf) => { serial_con = sc; out_pixel_buffer = buf; }
-		}
-		out_pixel_buffer.truncate(OUT_HEADER_SIZE);
+		let (mut serial_con, mut out_pixel_buf) = write_future.into_inner();
 
-		for rgb_pixel in leds.iter()
+		let smooth_factor = (time::precise_time_s() - last_frame_time) / smooth_time_const;
+		for (rgb_pixel, buf_i) in leds.iter()
 			.map(|led| {
 				capturer.frame.average_color(&led)
 			})
@@ -373,18 +394,22 @@ fn main() {
 							pixel
 						}
 					})
-				.to_rgb())	
+				.to_rgb())
+			.zip(range_step(OUT_HEADER_SIZE, OUT_HEADER_SIZE + out_pixel_buf.len(), 3))	
 		{
-			out_pixel_buffer.push(rgb_pixel.r);
-			out_pixel_buffer.push(rgb_pixel.g);
-			out_pixel_buffer.push(rgb_pixel.b);
+			out_pixel_buf[buf_i] =
+				smooth(out_pixel_buf[buf_i], rgb_pixel.r, smooth_factor);
+			out_pixel_buf[buf_i + 1] =
+				smooth(out_pixel_buf[buf_i + 1], rgb_pixel.g, smooth_factor);
+			out_pixel_buf[buf_i + 2] =
+				smooth(out_pixel_buf[buf_i + 2], rgb_pixel.b, smooth_factor);
 		}
 
 		let diag_aap = time::precise_time_s();
 
 		write_future = Future::spawn(move || {
-			serial_con.write(out_pixel_buffer.as_slice());
-			(serial_con, out_pixel_buffer)
+			serial_con.write(out_pixel_buf.as_slice());
+			(serial_con, out_pixel_buf)
 		});
 
 		// `precise_time_s` will reset every now and then. To handle this, substitute

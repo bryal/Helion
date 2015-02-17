@@ -12,20 +12,33 @@ Config must be located in the current working directory, which is same as where 
 
 Notes about config sections:
 
-* `Device`: `Output` is serial port to use, e.g. "COM2" on windows. `Baudrate` is rate to use when sending pixel buffer to Arduino, LEDstream expects this to be 115200. `Type` is not read, but must be one where `Output` and `Baudrate` fields exist.
+* `Device`:
+	* `Output`: Serial port to use, e.g. "COM2" on windows.
+
+	* `Baudrate`: Rate to use when sending pixel buffer to Arduino, LEDstream expects this to be 115200.
+
+	* `Type`: Not read, but must be one where `Output` and `Baudrate` fields exist.
 
 * `Construction`: Led placement. Everything is read.
 
 * `Image Process`: Led capture areas. Blackborder stuff not read.
 
-* `Frame Grabber`: **REQUIRED**. `Width` and `Height` decides to what resolution frame is resized when analyzing colors, smaller is faster. Works best if dimensions are divisors of the native resolution. If either is 0, use native resolution.
-`Interval` decides frame limit. 1/interval = FPS. 20ms (50fps) is good default.
+* `Frame Grabber`:
+	* `Width` and `Height`, **REQUIRED**: Determines to what resolution frame is resized when analyzing colors, smaller is faster. Works best if dimensions are divisors of the native resolution. If a field is 0, native resolution is used in that dimension.
 
-* `Smoothing`: Nothing yet!
+	* `Interval`: How often to capture the frame. Decides frame limit, FPS = 1/interval.
 
-* `Colors`: Everythign is read. If the RGB section or HSV section is left with default values, that section will be skipped for small performance gain.
+* `Smoothing`:
+	* `Type`: Type of smoothing to use, currently only `Linear smoothing`, no direct plans to add anything else.
 
-There are no plans to add support for anything under the `External` tab. That stuff is really just for Raspberry Pis with XBMC and stuff.
+	* `Time [ms]`: The time constant to use when smoothing. Larger values gives slower transition.
+
+		* `Linear Smoothing`: `"previous value" + ("value difference" * max("Frame time difference" / "Time constant", 1))`
+
+
+* `Colors`: Everything is read.
+
+* `External`: There are no plans to add support for anything under this tab. The stuff here is really just for Raspberry Pis with XBMC and stuff.
 
 
 # Building
@@ -43,7 +56,7 @@ Only Windows is supported at this time, as DXGCap is Windows only and I have not
 
 1. Build DXGCap and serial-C as dlls
 2. Place DXGCap.dll and serial_c.dll in project root.
-3. `cargo build`
+3. `cargo build --release`
 4. ???
 5. Profit
 

@@ -110,9 +110,9 @@ pub struct Transform {
 /// updateFrequency: The update frequency of the leds in Hz
 #[derive(Clone)]
 struct Smoothing {
-	type_: String,
-	time_ms: u32,
-	update_frequency: f32
+	pub type_: String,
+	pub time_ms: u32,
+	pub update_frequency: f32
 }
 impl Decodable for Smoothing {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<Smoothing, D::Error> {
