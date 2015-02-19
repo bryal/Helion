@@ -291,8 +291,15 @@ impl FrameTimer {
 		self.last_frame_dt
 	}
 
-	fn dt_to_now(&self) -> f64 {
-		partial_max(time::precise_time_s() - self.before, 0.0).unwrap_or(0.0)
+	fn dt_to_now(&mut self) -> f64 {
+		let now = time::precise_time_s();
+		let dt = now - self.before;
+		if dt >= 0.0 {
+			dt
+		} else {
+			self.before = now;
+			0.0
+		}
 	}
 
 	fn tick(&mut self) {
@@ -381,6 +388,7 @@ fn main() {
 		// Don't capture frame if going faster than frame limit,
 		// but still proceed to smooth leds
 		if capture_timer.dt_to_now() > capture_frame_interval {
+			// If something goes wrong, reuse last frame
 			match capturer.capture_frame() {
 				CrOk => (),
 				// Access Denied means we are probably in fullscreen app with
@@ -389,11 +397,9 @@ fn main() {
 					println!("Access Denied");
 					timer::sleep(Duration::seconds(2))
 				},
-				// Access Lost is handled automatically in DXGCap,
-				// Timeout is no biggie, Fail might be bad, but might also not.
-				// For all of these, just reuse the previous frame
+				// Should be handled automatically in DXGCap
 				CrAccessLost => println!("Access to desktop duplication lost"),
-				CrTimeout => println!("timeout"),
+				CrTimeout => (),
 				CrFail => println!("Unexpected failure when capturing screen"),
 			}
 			capture_timer.tick();
