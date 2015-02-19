@@ -7,7 +7,7 @@ authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
 
 [dependencies]
-rustc-serialize = "0.2"
+rustc-serialize = "*"
 
 [dependencies.time]
 git = "https://github.com/rust-lang/time"

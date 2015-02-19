@@ -35,7 +35,7 @@ use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
 use std::sync::Future;
-use std::cmp::max;
+use std::cmp::{max, partial_max};
 use libc::{uint8_t, 
 	c_void,
 	size_t};
@@ -53,6 +53,8 @@ extern {
 	fn create_dxgi_manager() -> *mut c_void;
 
 	fn delete_dxgi_manager(dxgi_manager: *mut c_void);
+
+	fn set_timeout(dxgi_manager: *mut c_void, timeout: u32);
 
 	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
 		height: *mut size_t);
@@ -153,27 +155,30 @@ impl Frame {
 	}
 
 	fn average_color(&self, led: &Led) -> RGB8 {
-		// TODO: Precaltulate stuff
-		let (start_y, end_y, start_x, end_x) = (
-			(led.vscan.minimum * self.resize_height as f32) as usize,
-			(led.vscan.maximum * self.resize_height as f32) as usize,
-			(led.hscan.minimum * self.resize_width as f32) as usize,
-			(led.hscan.maximum * self.resize_width as f32) as usize);
-		let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-		for row in start_y..end_y {
-			for col in start_x..end_x {
-				let i = (row as f32 * self.resize_height_ratio * self.width as f32 +
-					col as f32 * self.resize_width_ratio) as usize;
-				r_sum += self.data[i].r as u64;
-				g_sum += self.data[i].g as u64;
-				b_sum += self.data[i].b as u64;
+		if self.data.len() == 0 {
+			RGB8{ r: 0, g: 0, b: 0 }
+		} else {
+			let (start_y, end_y, start_x, end_x) = (
+				(led.vscan.minimum * self.resize_height as f32) as usize,
+				(led.vscan.maximum * self.resize_height as f32) as usize,
+				(led.hscan.minimum * self.resize_width as f32) as usize,
+				(led.hscan.maximum * self.resize_width as f32) as usize);
+			let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
+			for row in start_y..end_y {
+				for col in start_x..end_x {
+					let i = (row as f32 * self.resize_height_ratio * self.width as f32
+						+ col as f32 * self.resize_width_ratio) as usize;
+					r_sum += self.data[i].r as u64;
+					g_sum += self.data[i].g as u64;
+					b_sum += self.data[i].b as u64;
+				}
 			}
-		}
 
-		let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
-		RGB8{r: (r_sum/n_of_pixels) as u8,
-			g: (g_sum/n_of_pixels) as u8,
-			b: (b_sum/n_of_pixels) as u8 }
+			let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
+			RGB8{r: (r_sum/n_of_pixels) as u8,
+				g: (g_sum/n_of_pixels) as u8,
+				b: (b_sum/n_of_pixels) as u8 }
+		}
 	}
 }
 
@@ -190,6 +195,16 @@ impl Capturer {
 		} else {
 			Capturer{ dxgi_manager: manager, frame: Frame::new() }
 		}
+	}
+
+	fn with_timeout(timeout: u32) -> Capturer {
+		let mut c = Capturer::new();
+		c.set_timeout(timeout);
+		c
+	}
+
+	fn set_timeout(&mut self, timeout: u32) {
+		unsafe { set_timeout(self.dxgi_manager, timeout) }
 	}
 
 	fn get_output_dimensions(&self) -> (usize, usize) {
@@ -243,7 +258,7 @@ impl Drop for Capturer {
 }
 
 fn new_pixel_buf_header(n_leds: u16) -> Vec<u8> {
-	// A special header / magic word is expected by the corresponding LED streaming code 
+	// A special header is expected by the corresponding LED streaming code 
 	// running on the Arduino. This only needs to be initialized once because the number of  
 	// LEDs remains constant.
 
@@ -252,29 +267,38 @@ fn new_pixel_buf_header(n_leds: u16) -> Vec<u8> {
 	let count_high = ((n_leds - 1) >> 8) as u8;  // LED count high byte
 	let count_low = ((n_leds - 1) & 0xff) as u8; // LED count low byte
 	vec![
-		// Magic word. This is the same magic word as the one in the arduino program LEDstream
 		'A' as u8,
 		'd' as u8,
 		'a' as u8,
+
 		count_high,
 		count_low,
+
 		count_high ^ count_low ^ 0x55, // Checksum
 	]
 }
 
 struct FrameTimer {
-	prev_t: f64,
-	delta_t: f64,
+	before: f64,
+	last_frame_dt: f64,
 }
 impl FrameTimer {
 	fn new() -> FrameTimer {
-		FrameTimer{ prev_t: time::precise_time_s(), delta_t: 0.0}
+		FrameTimer{ before: time::precise_time_s(), last_frame_dt: 0.0}
+	}
+
+	fn last_frame_dt(&self) -> f64 {
+		self.last_frame_dt
+	}
+
+	fn dt_to_now(&self) -> f64 {
+		partial_max(time::precise_time_s() - self.before, 0.0).unwrap_or(0.0)
 	}
 
 	fn tick(&mut self) {
 		let now = time::precise_time_s();
-		self.delta_t = now - self.prev_t;
-		self.prev_t = now;
+		self.last_frame_dt = partial_max(now - self.before, 0.0).unwrap_or(0.0);
+		self.before = now;
 	}
 }
 
@@ -333,7 +357,9 @@ fn main() {
 	let resize_dimensions = (config.framegrabber.width, config.framegrabber.height);
 	capturer.frame.set_resize_dimensions(resize_dimensions);
 
-	let fps_limit = config.framegrabber.frequency_Hz;
+	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
+	capturer.set_timeout((1000.0 * capture_frame_interval) as u32);
+	let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
 	// Function to use when smoothing led colors
 	type SmoothFn = fn(&RGB8, RGB8, f64) -> RGB8;
@@ -345,32 +371,40 @@ fn main() {
 	// max(..., 1) to avoid divide by zero
 	let smooth_time_const = max(config.color.smoothing.time_ms, 1) as f64 / 1000.0;
 
-	let mut frame_timer = FrameTimer::new();
+	let mut capture_timer = FrameTimer::new();
+	let mut led_refresh_timer = FrameTimer::new();
 	let mut diag_timer = FrameTimer::new();
 	let mut diag_i = 0;
 	loop {
 		let diag_bcf = time::precise_time_s();
-		match capturer.capture_frame() {
-			CrOk => (),
-			// Access Denied means we are probably in fullscreen app with restricted 
-			// access, sleep until we have access again
-			CrAccessDenied => {
-				println!("Access Denied");
-				timer::sleep(Duration::seconds(2))
-			},
-			// Access Lost is handled automatically in DXGCap, Timeout is no biggie,
-			// Fail might be bad, but might also not.
-			// For all of these, just reuse the previous frame
-			CrAccessLost => println!("Access to desktop duplication lost"),
-			CrTimeout => (),
-			CrFail => println!("Unexpected failure when capturing screen"),
+
+		// Don't capture frame if going faster than frame limit,
+		// but still proceed to smooth leds
+		if capture_timer.dt_to_now() > capture_frame_interval {
+			match capturer.capture_frame() {
+				CrOk => (),
+				// Access Denied means we are probably in fullscreen app with
+				// restricted access, sleep until we have access again
+				CrAccessDenied => {
+					println!("Access Denied");
+					timer::sleep(Duration::seconds(2))
+				},
+				// Access Lost is handled automatically in DXGCap,
+				// Timeout is no biggie, Fail might be bad, but might also not.
+				// For all of these, just reuse the previous frame
+				CrAccessLost => println!("Access to desktop duplication lost"),
+				CrTimeout => println!("timeout"),
+				CrFail => println!("Unexpected failure when capturing screen"),
+			}
+			capture_timer.tick();
 		}
+
 		let diag_acf = time::precise_time_s();
 		let diag_bap = diag_acf;
 
 		let (mut serial_con, out_header, mut out_pixels) = write_future.into_inner();
 
-		let smooth_factor = frame_timer.delta_t / smooth_time_const;
+		let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
 		for (new_pixel, out_pixel_i) in leds.iter()
 			.map(|led| {
 				capturer.frame.average_color(&led)
@@ -410,10 +444,10 @@ fn main() {
 
 		// `precise_time_s` will reset every now and then. To handle this, substitute
 		// `delta_time` for zero if it is negative.
-		frame_timer.tick();
-		let overtime = -(frame_timer.delta_t.max(0.0) - 1.0 / fps_limit);
-		if overtime > 0.0 {
-			timer::sleep(Duration::microseconds((overtime * 1_000_000.0) as i64));
+		
+		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
+		if time_left > 0.0 {
+			timer::sleep(Duration::microseconds((time_left * 1_000_000.0) as i64));
 		}
 
 		diag_i += 1;
@@ -421,8 +455,9 @@ fn main() {
 			diag_timer.tick();
 			println!("cf fps: {}", 1.0 / (diag_acf-diag_bcf));
 			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
-			println!("avg fps: {}\n", 1.0 / (diag_timer.delta_t / 60.0));
+			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 60.0));
 			diag_i = 0;
 		}
+		led_refresh_timer.tick();
 	}
 }

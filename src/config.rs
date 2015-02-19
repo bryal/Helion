@@ -112,7 +112,7 @@ pub struct Transform {
 struct Smoothing {
 	pub type_: String,
 	pub time_ms: u32,
-	pub update_frequency: f32
+	pub update_frequency: f64
 }
 impl Decodable for Smoothing {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<Smoothing, D::Error> {
