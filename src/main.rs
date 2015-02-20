@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#![feature(libc, core, std_misc, io, unboxed_closures, box_syntax, path)]
+#![feature(libc, core, std_misc, io, unboxed_closures, box_syntax, path, old_io, fs)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -33,7 +33,6 @@ use color::{RGB8, RgbTransformer, Pixel};
 use std::ptr;
 use std::mem;
 use std::iter::repeat;
-use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
@@ -198,12 +197,6 @@ impl Capturer {
 		}
 	}
 
-	fn with_timeout(timeout: u32) -> Capturer {
-		let mut c = Capturer::new();
-		c.set_timeout(timeout);
-		c
-	}
-
 	fn set_timeout(&mut self, timeout: u32) {
 		unsafe { set_timeout(self.dxgi_manager, timeout) }
 	}
@@ -363,16 +356,21 @@ fn main() {
 		
 		thread::spawn(move || {
 			loop {
-				let out_pixels = to_write_thread_rx.recv().unwrap();
-				serial_con.write(out_header.as_slice());
+				let out_bytes = color::rgbs_to_bytes(
+					to_write_thread_rx.recv().unwrap());
 
-				let out_bytes: Vec<u8> = color::rgbs_to_bytes(out_pixels);
-				serial_con.write(out_bytes.as_slice());
+				serial_con.write(out_header.as_slice())
+					.and(serial_con.write(out_bytes.as_slice()))
+					.unwrap_or_else(|e| {
+						println!("Failed to write serial data\n\
+							{}", e);
+						0
+					});
 
-				from_write_thread_tx.send(color::bytes_to_rgbs(out_bytes));
+				from_write_thread_tx.send(color::bytes_to_rgbs(out_bytes)).unwrap();
 			}
 		});
-		to_write_thread_tx.send(out_pixels);
+		to_write_thread_tx.send(out_pixels).unwrap();
 
 		(to_write_thread_tx, from_write_thread_rx)
 	};
@@ -401,8 +399,6 @@ fn main() {
 	let mut diag_timer = FrameTimer::new();
 	let mut diag_i = 0;
 	loop {
-		let diag_bcf = time::precise_time_s();
-
 		// Don't capture frame if going faster than frame limit,
 		// but still proceed to smooth leds
 		if capture_timer.dt_to_now() > capture_frame_interval {
@@ -423,8 +419,7 @@ fn main() {
 			capture_timer.tick();
 		}
 
-		let diag_acf = time::precise_time_s();
-		let diag_bap = diag_acf;
+		let diag_bap = time::precise_time_s();
 
 		let mut out_pixels = write_thread_rx.recv().unwrap();
 
@@ -434,20 +429,21 @@ fn main() {
 				capturer.frame.average_color(&led)
 			})
 			.zip(led_transformers.iter())
-			.map(|(pixel_future, transformers)| transformers.iter()
-				.fold(box pixel_future as Box<Pixel>,
-					|mut pixel, &(ref opt_rgb_tr, ref opt_hsv_tr)| {
-						if let &Some(ref rgb_tr) = opt_rgb_tr {
-							pixel = (box pixel.rgb_transform(rgb_tr))
-								as Box<Pixel>;
-						}
-						if let &Some(ref hsv_tr) = opt_hsv_tr {
-							(box pixel.hsv_transform(hsv_tr))
-								as Box<Pixel>
-						} else {
-							pixel
-						}
-					})
+			.map(|(led_rgb, transformers)|
+				transformers.iter().fold(box led_rgb as Box<Pixel>,
+					|mut led_color, &(ref opt_rgb_tr, ref opt_hsv_tr)|
+				{
+					if let &Some(ref rgb_tr) = opt_rgb_tr {
+						led_color = box led_color.rgb_transform(rgb_tr)
+							as Box<Pixel>;
+					}
+					if let &Some(ref hsv_tr) = opt_hsv_tr {
+						box led_color.hsv_transform(hsv_tr)
+							as Box<Pixel>
+					} else {
+						led_color
+					}
+				})
 				.to_rgb())
 			.zip(out_pixels.iter_mut())
 		{
@@ -456,7 +452,7 @@ fn main() {
 
 		let diag_aap = time::precise_time_s();
 
-		write_thread_tx.send(out_pixels);
+		write_thread_tx.send(out_pixels).unwrap();
 		
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
@@ -466,7 +462,6 @@ fn main() {
 		diag_i += 1;
 		if diag_i >= 60 {
 			diag_timer.tick();
-			println!("cf fps: {}", 1.0 / (diag_acf-diag_bcf));
 			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
 			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 60.0));
 			diag_i = 0;

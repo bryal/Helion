@@ -22,8 +22,9 @@
 
 #![allow(dead_code, non_snake_case)]
 
-use std::old_io::File;
+use std::fs::File;
 use std::ops::Range;
+use std::path;
 
 use rustc_serialize::{json, Decoder, Decodable};
 
@@ -185,17 +186,28 @@ struct LedsConfig  {
 }
 
 pub fn parse_config() -> LedsConfig {
-	let js = match File::open(&Path::new("hyperion.config.json")).read_to_string() {
-		Ok(o) => o,
+	use std::io::Read;
+
+	let mut json_str = String::with_capacity(10_000);
+	match File::open(&path::Path::new("hyperion.config.json")) {
+		Ok(mut file) => match file.read_to_string(&mut json_str) {
+			Ok(_) => (),
+			Err(e) => {
+				println!("Error\nConfig could not be read\n");
+				panic!("{}", e)
+			}
+		},
 		Err(e) => {
 			println!("Error\nConfig file `hyperion.config.json` could not be opened\n");
 			panic!("{}", e)
 		}
-	};
-	let no_comments = js.lines()
+	}
+
+	let no_comments = json_str.lines()
 		.map(|l| l.trim())
 		.filter(|l| !l.is_empty() && !l.starts_with("//"))
 		.collect::<String>();
+
 	match json::decode::<LedsConfig>(no_comments.as_slice()) {
 		Ok(o) => o,
 		Err(e) => {
