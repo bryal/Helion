@@ -26,7 +26,7 @@ Notes about config sections:
 * `Frame Grabber`:
 	* `Width` and `Height`, **REQUIRED**: Determines to what resolution frame is resized when analyzing colors, smaller is faster. Works best if dimensions are divisors of the native resolution. If a field is 0, native resolution is used in that dimension.
 
-	* `Interval`: How often to capture the frame. Decides frame limit, FPS = 1/interval.
+	* `Interval`: How often to capture the frame. If no smoothing is enabled, this also decides LED refresh rate. FPS = 1/interval.
 
 * `Smoothing`:
 	* `Type`: Type of smoothing to use, currently only `Linear smoothing`, no direct plans to add anything else.
@@ -34,6 +34,8 @@ Notes about config sections:
 	* `Time [ms]`: The time constant to use when smoothing. Larger values gives slower transition.
 
 		* `Linear Smoothing`: `"previous value" + ("value difference" * max("Frame time difference" / "Time constant", 1))`
+
+	* `Update Freq. [Hz]`: How often to update LEDs. Should be higher than `Frame Grabber` -> `Interval`. When no new frame has been captured, just keep smoothing the colors to previous frame.
 
 
 * `Colors`: Everything is read.
