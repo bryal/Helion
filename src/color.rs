@@ -56,6 +56,16 @@ pub trait Pixel {
 	}
 }
 
+// Must contain only the fields [b, g, r, a] in that order, since this struct is transmuted to from
+// DXGCap raw BGRA8 buffer.
+#[derive(Clone)]
+pub struct BGRA8 {
+	pub b: u8,
+	pub g: u8,
+	pub r: u8,
+	pub a: u8
+}
+
 #[derive(Clone, Debug)]
 pub struct RGB8 {
 	pub r: u8,
