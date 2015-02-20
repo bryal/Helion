@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// TODO: TESTS!
+
 #![feature(libc, core, std_misc, io, unboxed_closures, box_syntax, path, old_io, fs)]
 
 extern crate libc;
@@ -28,7 +30,9 @@ extern crate time;
 extern crate "serial-rust" as serial;
 
 use config::parse_led_indices;
-use color::{RGB8, RgbTransformer, Pixel};
+use color::{RGB8,
+	RgbTransformer,
+	Pixel};
 use capture::Capturer;
 
 use std::iter::repeat;

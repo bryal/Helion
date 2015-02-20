@@ -19,6 +19,10 @@ extern {
 
 	fn set_timeout(dxgi_manager: *mut c_void, timeout: u32);
 
+	fn set_capture_source(dxgi_manager: *mut c_void, cs: u16);
+
+	fn get_capture_source(dxgi_manager: *mut c_void) -> u16;
+
 	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
 		height: *mut size_t);
 
@@ -157,6 +161,16 @@ impl Capturer {
 
 	pub fn set_timeout(&mut self, timeout: u32) {
 		unsafe { set_timeout(self.dxgi_manager, timeout) }
+	}
+
+	#[allow(dead_code)]
+	pub fn set_capture_source(&mut self, cs: u16) {
+		unsafe { set_capture_source(self.dxgi_manager, cs) }
+	}
+
+	#[allow(dead_code)]
+	pub fn get_capture_source(&mut self) -> u16 {
+		unsafe { get_capture_source(self.dxgi_manager) }
 	}
 
 	pub fn get_output_dimensions(&self) -> (usize, usize) {

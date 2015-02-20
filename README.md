@@ -35,7 +35,7 @@ Notes about config sections:
 
 		* `Linear Smoothing`: `"previous value" + ("value difference" * max("Frame time difference" / "Time constant", 1))`
 
-	* `Update Freq. [Hz]`: How often to update LEDs. Should be higher than `Frame Grabber` -> `Interval`. When no new frame has been captured, just keep smoothing the colors to previous frame.
+	* `Update Freq. [Hz]`: How often to update LEDs. Should be higher than FPS of `Frame Grabber` -> `Interval`. When no new frame has been captured, just keep smoothing the colors to previous frame.
 
 
 * `Colors`: Everything is read.
