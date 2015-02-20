@@ -50,7 +50,7 @@
 				"leds" : "*",
 				"hsv" :
 				{
-					"saturationGain" : 1.1500,
+					"saturationGain" : 1.1800,
 					"valueGain"      : 1.0000
 				},
 				"red" :
@@ -78,9 +78,9 @@
 		],
 		"smoothing" :
 		{
-			"type"            : "none",
-			"time_ms"         : 100,
-			"updateFrequency" : 20.0000
+			"type"            : "linear",
+			"time_ms"         : 35,
+			"updateFrequency" : 60.0000
 		}
 	},
 
@@ -289,9 +289,9 @@
 	///   * frequency_Hz : The frequency of the frame grab [Hz]
 	"framegrabber" : 
 	{
-		"width" : 1280,
-		"height" : 720,
-		"frequency_Hz" : 60.0
+		"width" : 960,
+		"height" : 540,
+		"frequency_Hz" : 30.0
 	},
 
 	/// The configuration of the XBMC connection used to enable and disable the frame-grabber. Contains the following fields: 

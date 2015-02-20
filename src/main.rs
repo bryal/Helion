@@ -185,6 +185,8 @@ fn main() {
 	let mut diag_timer = FrameTimer::new();
 	let mut diag_i = 0;
 	loop {
+		led_refresh_timer.tick();
+
 		// Don't capture frame if going faster than frame limit,
 		// but still proceed to smooth leds
 		if capture_timer.dt_to_now() > capture_frame_interval {
@@ -239,20 +241,18 @@ fn main() {
 		let diag_aap = time::precise_time_s();
 
 		write_thread_tx.send(out_pixels).unwrap();
-		
+
+		diag_i += 1;
+		if diag_i >= 120 {
+			diag_timer.tick();
+			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
+			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 120.0));
+			diag_i = 0;
+		}
+
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
 			timer::sleep(Duration::microseconds((time_left * 1_000_000.0) as i64));
 		}
-
-		diag_i += 1;
-		if diag_i >= 60 {
-			diag_timer.tick();
-			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
-			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 60.0));
-			diag_i = 0;
-		}
-
-		led_refresh_timer.tick();
 	}
 }
