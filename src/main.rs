@@ -27,6 +27,9 @@ extern crate "rustc-serialize" as rustc_serialize;
 extern crate time;
 extern crate "serial-rust" as serial;
 
+use config::{Led, parse_led_indices};
+use color::{RGB8, RgbTransformer, Pixel};
+
 use std::ptr;
 use std::mem;
 use std::iter::repeat;
@@ -34,14 +37,12 @@ use std::num::Float;
 use std::ops::Drop;
 use std::old_io::timer;
 use std::time::Duration;
-use std::sync::Future;
+use std::sync::mpsc::channel;
+use std::thread;
 use std::cmp::{max, partial_max};
 use libc::{uint8_t, 
 	c_void,
 	size_t};
-
-use config::{Led, parse_led_indices};
-use color::{RGB8, RgbTransformer, Pixel};
 
 mod config;
 mod color;
@@ -344,21 +345,38 @@ fn main() {
 		}
 	}
 
-	let mut write_future = {
+	// Do serial writing on own thread as to not block.
+	let (write_thread_tx, write_thread_rx) = {
 		let mut serial_con =
 			serial::Connection::new(config.device.output.clone(), config.device.rate);
 		serial_con.open().unwrap();
 
+		// Header to write before led data
 		let out_header = new_pixel_buf_header(leds.len() as u16);
-		let out_pixels: Vec<RGB8> = repeat(RGB8{r: 0, g: 0, b: 0})
+
+		let out_pixels = repeat(RGB8{r: 0, g: 0, b: 0})
 			.take(leds.len())
 			.collect();
 
-		// In order for serial writing not to block, do the writing in a Future. This 
-		// requires stuff to be moved, so return them from the Future for reuse.
-		// TODO: Consider using Thread::spawn and channels
-		Future::from_value((serial_con, out_header, out_pixels))
+		let (from_write_thread_tx, from_write_thread_rx) = channel();
+		let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
+		
+		thread::spawn(move || {
+			loop {
+				let out_pixels = to_write_thread_rx.recv().unwrap();
+				serial_con.write(out_header.as_slice());
+
+				let out_bytes: Vec<u8> = color::rgbs_to_bytes(out_pixels);
+				serial_con.write(out_bytes.as_slice());
+
+				from_write_thread_tx.send(color::bytes_to_rgbs(out_bytes));
+			}
+		});
+		to_write_thread_tx.send(out_pixels);
+
+		(to_write_thread_tx, from_write_thread_rx)
 	};
+	
 
 	let mut capturer = Capturer::new();
 	let resize_dimensions = (config.framegrabber.width, config.framegrabber.height);
@@ -375,7 +393,7 @@ fn main() {
 		_ => color::no_smooth as SmoothFn,
 	};
 
-	// max(..., 1) to avoid divide by zero
+	// max w/ 1 to avoid divide by zero
 	let smooth_time_const = max(config.color.smoothing.time_ms, 1) as f64 / 1000.0;
 
 	let mut capture_timer = FrameTimer::new();
@@ -408,10 +426,10 @@ fn main() {
 		let diag_acf = time::precise_time_s();
 		let diag_bap = diag_acf;
 
-		let (mut serial_con, out_header, mut out_pixels) = write_future.into_inner();
+		let mut out_pixels = write_thread_rx.recv().unwrap();
 
 		let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
-		for (new_pixel, out_pixel_i) in leds.iter()
+		for (to_pixel, out_buf_pixel) in leds.iter()
 			.map(|led| {
 				capturer.frame.average_color(&led)
 			})
@@ -431,25 +449,14 @@ fn main() {
 						}
 					})
 				.to_rgb())
-			.zip(0..out_pixels.len())
+			.zip(out_pixels.iter_mut())
 		{
-			out_pixels[out_pixel_i] =
-				smooth(&out_pixels[out_pixel_i], new_pixel, smooth_factor);
+			*out_buf_pixel = smooth(out_buf_pixel, to_pixel, smooth_factor);
 		}
 
 		let diag_aap = time::precise_time_s();
 
-		write_future = Future::spawn(move || {
-			serial_con.write(out_header.as_slice());
-
-			let out_bytes: Vec<u8> = color::rgbs_to_bytes(out_pixels);
-			serial_con.write(out_bytes.as_slice());
-
-			(serial_con, out_header, color::bytes_to_rgbs(out_bytes))
-		});
-
-		// `precise_time_s` will reset every now and then. To handle this, substitute
-		// `delta_time` for zero if it is negative.
+		write_thread_tx.send(out_pixels);
 		
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
@@ -464,6 +471,7 @@ fn main() {
 			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 60.0));
 			diag_i = 0;
 		}
+
 		led_refresh_timer.tick();
 	}
 }
