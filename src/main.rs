@@ -38,7 +38,9 @@ use capture::Capturer;
 use std::iter::repeat;
 use std::old_io::timer;
 use std::time::Duration;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Sender,
+	Receiver,
+	channel};
 use std::thread;
 use std::cmp::{max, partial_max};
 
@@ -98,8 +100,41 @@ impl FrameTimer {
 	}
 }
 
-fn main() {
+// Initialize a thread for serial writing given a serial port, baud rate, header to write before
+// each data write, and buffer with led colors.
+fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec<RGB8>)
+	-> (Sender<Vec<RGB8>>, Receiver<Vec<RGB8>>)
+{
 	use std::io::Write;
+
+	let mut serial_con = serial::Connection::new(port, baud_rate);
+	serial_con.open().unwrap();
+
+	let (from_write_thread_tx, from_write_thread_rx) = channel();
+	let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
+	
+	thread::spawn(move || loop {
+		let pixel_buf = color::rgbs_to_bytes(to_write_thread_rx.recv().unwrap());
+
+		match serial_con.write(header.as_slice()) {
+			Ok(hn) if hn == header.len() => match serial_con.write(pixel_buf.as_slice())
+			{
+				Ok(bn) if bn == pixel_buf.len() => (),
+				Ok(_) => println!("Failed to write all bytes of RGB data"),
+				Err(e) => println!("Failed to write RGB data, {}", e)
+			},
+			Ok(_) => println!("Failed to write all bytes in header"),
+			Err(e) => println!("Failed to write header, {}", e)
+		}
+
+		from_write_thread_tx.send(color::bytes_to_rgbs(pixel_buf)).unwrap();
+	});
+	to_write_thread_tx.send(pixel_buf).unwrap();
+
+	(to_write_thread_tx, from_write_thread_rx)
+}
+
+fn main() {
 	use capture::CaptureResult::*;
 
 	// Parse the HyperCon json config
@@ -132,39 +167,14 @@ fn main() {
 
 	// Do serial writing on own thread as to not block.
 	let (write_thread_tx, write_thread_rx) = {
-		let mut serial_con =
-			serial::Connection::new(config.device.output.clone(), config.device.rate);
-		serial_con.open().unwrap();
-
 		// Header to write before led data
 		let out_header = new_pixel_buf_header(leds.len() as u16);
 
-		let out_pixels = repeat(RGB8{r: 0, g: 0, b: 0})
-			.take(leds.len())
-			.collect();
+		// Skeleton for the output led pixel buffer to write to arduino
+		let out_pixels = repeat(RGB8{r: 0, g: 0, b: 0}).take(leds.len()).collect();
 
-		let (from_write_thread_tx, from_write_thread_rx) = channel();
-		let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
-		
-		thread::spawn(move || {
-			loop {
-				let out_bytes = color::rgbs_to_bytes(
-					to_write_thread_rx.recv().unwrap());
-
-				serial_con.write(out_header.as_slice())
-					.and(serial_con.write(out_bytes.as_slice()))
-					.unwrap_or_else(|e| {
-						println!("Failed to write serial data\n\
-							{}", e);
-						0
-					});
-
-				from_write_thread_tx.send(color::bytes_to_rgbs(out_bytes)).unwrap();
-			}
-		});
-		to_write_thread_tx.send(out_pixels).unwrap();
-
-		(to_write_thread_tx, from_write_thread_rx)
+		init_write_thread(config.device.output.clone(), config.device.rate.clone(),
+			out_header, out_pixels)
 	};
 	
 	let mut capturer = Capturer::new();
