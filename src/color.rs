@@ -171,10 +171,9 @@ pub fn linear_smooth(from: &RGB8, to: RGB8, factor: f64) -> RGB8 {
 		let (r_diff, g_diff, b_diff) = (to.r as f64 - from.r as f64,
 			to.g as f64 - from.g as f64,
 			to.b as f64 - from.b as f64);
-
-		RGB8{ r: from.r + (r_diff * factor) as u8,
-			g: from.g + (g_diff * factor) as u8,
-			b: from.b + (b_diff * factor) as u8,
+		RGB8{ r: (from.r as f64 + (r_diff * factor)) as u8,
+			g: (from.g as f64 + (g_diff * factor)) as u8,
+			b: (from.b as f64 + (b_diff * factor)) as u8,
 		}
 	}
 }
