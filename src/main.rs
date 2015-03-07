@@ -33,7 +33,7 @@ use config::parse_led_indices;
 use color::{RGB8,
 	RgbTransformer,
 	Pixel};
-use capture::Capturer;
+use capture::{Capturer, ImageAnalyzer};
 
 use std::iter::repeat;
 use std::old_io::timer;
@@ -178,10 +178,12 @@ fn main() {
 	};
 	
 	let mut capturer = Capturer::new();
-	capturer.frame.set_resize_dimensions(
-		(config.framegrabber.width, config.framegrabber.height));
 	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
 	capturer.set_timeout((1000.0 * capture_frame_interval) as u32);
+
+	let mut frame_analyzer = ImageAnalyzer::new();
+	frame_analyzer.set_resize_dimensions(
+		(config.framegrabber.width, config.framegrabber.height));
 
 	// Function to use when smoothing led colors
 	type SmoothFn = fn(&RGB8, RGB8, f64) -> RGB8;
@@ -207,7 +209,7 @@ fn main() {
 		if capture_timer.dt_to_now() > capture_frame_interval {
 			// If something goes wrong, last frame is reused
 			match capturer.capture_frame() {
-				Ok(_) => (),
+				Ok(frame) => {frame_analyzer.swap_slotted(frame);},
 				// Access Denied means we are probably in fullscreen app with
 				// restricted access, sleep until we have access again
 				Err(CrAccessDenied) => {
@@ -228,7 +230,7 @@ fn main() {
 
 		let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
 		for (to_pixel, pixel_in_buf) in leds.iter()
-			.map(|led| capturer.frame.average_color(&led))
+			.map(|led| frame_analyzer.average_color(&led))
 			.zip(led_transformers_list.iter())
 			.map(|(average_color, color_transformers)|
 				color_transformers.iter().fold(box average_color as Box<Pixel>,

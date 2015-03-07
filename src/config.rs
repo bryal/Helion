@@ -165,8 +165,8 @@ pub struct Led {
 /// frequency_Hz: The frequency of the frame grab [Hz]
 #[derive(RustcDecodable, Clone)]
 struct FrameGrabber {
-	pub width: usize,
-	pub height: usize,
+	pub width: u32,
+	pub height: u32,
 	pub frequency_Hz: f64
 }
 
