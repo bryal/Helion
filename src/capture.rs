@@ -7,6 +7,20 @@ use libc::{c_void,
 use std::ptr;
 use std::mem;
 
+#[repr(C)]
+#[allow(dead_code)]
+pub enum CaptureResult {
+	CrOk,
+	// Could not duplicate output, access denied. Might be in protected fullscreen.
+	CrAccessDenied,
+	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
+	CrAccessLost,
+	// AcquireNextFrame timed out.
+	CrTimeout,
+	// General/Unexpected failure
+	CrFail,
+}
+
 #[link(name = "DXGCap")]
 extern {
 	fn init();
@@ -26,48 +40,19 @@ extern {
 	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut size_t,
 		height: *mut size_t);
 
-	// DXGI status code, HRESULT
+	// Returns DXGI status code, HRESULT
 	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
-		o_bytes: *mut *mut uint8_t) -> uint8_t;
-}
-
-// Initiate windows stuff that DXGCap requires.
-fn init_dxgi() {
-	unsafe { init(); }
-}
-
-fn uninit_dxgi() {
-	unsafe { uninit(); }
+		o_bytes: *mut *mut uint8_t) -> CaptureResult;
 }
 
 static DXGI_PIXEL_SIZE: u64 = 4; // BGRA8 => 4 bytes, DXGI default
 
-pub enum CaptureResult {
-	CrOk,
-	// Could not duplicate output, access denied. Might be in protected fullscreen.
-	CrAccessDenied,
-	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
-	CrAccessLost,
-	// AcquireNextFrame timed out.
-	CrTimeout,
-	// General/Unexpected failure
-	CrFail,
+/// Initiate windows stuff that DXGCap requires.
+fn init_dxgi() {
+	unsafe { init(); }
 }
-
-trait AsCaptureResult {
-	fn as_capture_result(&self) -> CaptureResult;
-}
-
-impl AsCaptureResult for uint8_t {
-	fn as_capture_result(&self) -> CaptureResult {
-		match *self {
-			0 => CaptureResult::CrOk,
-			1 => CaptureResult::CrAccessDenied,
-			2 => CaptureResult::CrAccessLost,
-			3 => CaptureResult::CrTimeout,
-			_ => CaptureResult::CrFail,
-		}
-	}
+fn uninit_dxgi() {
+	unsafe { uninit(); }
 }
 
 #[derive(Clone)]
@@ -183,8 +168,7 @@ impl Capturer {
 		let mut buffer_size: size_t = 0;
 		let mut buffer = ptr::null_mut::<u8>();
 		let cr = unsafe{
-			get_frame_bytes(self.dxgi_manager, &mut buffer_size, &mut buffer)
-				.as_capture_result() };
+			get_frame_bytes(self.dxgi_manager, &mut buffer_size, &mut buffer) };
 		if let CaptureResult::CrOk = cr  {
 			if buffer as *const _ == self.frame.data.as_ptr() {
 				CaptureResult::CrOk

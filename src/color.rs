@@ -9,7 +9,6 @@ static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects
 type ColorTransformerConfig = config::Transform;
 type HSVTransformer = config::HSV;
 
-// % is remainder, need modulo
 fn modulo(l: f32, r: f32) -> f32 {
 	if l >= 0.0 {
 		l % r
@@ -29,6 +28,7 @@ pub trait Pixel {
 	fn to_rgb(&self) -> RGB8;
 	fn to_hsv(&self) -> HSV;
 
+	/// Transform the color of a pixel with RGB modifiers.
 	fn rgb_transform(&self, rgb_transformer: &RgbTransformer) -> RGB8 {
 		let rgb = self.to_rgb();
 		let mut colors = [rgb.r, rgb.g, rgb.b];
@@ -47,6 +47,7 @@ pub trait Pixel {
 		RGB8{r: colors[0], g: colors[1], b: colors[2]}
 	}
 
+	/// Transform the color of a pixel with HSV modifiers.
 	fn hsv_transform(&self, transformer: &HSVTransformer) -> HSV {
 		let hsv = self.to_hsv();
 		HSV{hue: hsv.hue,
