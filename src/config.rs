@@ -41,18 +41,18 @@ struct DeviceConfig {
 }
 impl Decodable for DeviceConfig {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<DeviceConfig, D::Error> {
-		decoder.read_struct("DeviceConfig", 3us, |d|
+		decoder.read_struct("DeviceConfig", 3, |d|
 			Result::Ok(DeviceConfig{
-				type_: match d.read_struct_field("type", 0us, Decodable::decode) {
+				type_: match d.read_struct_field("type", 0, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
-				rate: match d.read_struct_field("rate", 1us, Decodable::decode) {
+				rate: match d.read_struct_field("rate", 1, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
-				output: match d.read_struct_field("output", 0us, Decodable::decode) {
+				output: match d.read_struct_field("output", 0, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
-				color_order: match d.read_struct_field("colorOrder", 2us,
+				color_order: match d.read_struct_field("colorOrder", 2,
 					Decodable::decode)
 				{
 					Ok(v) => v,
@@ -117,17 +117,17 @@ struct Smoothing {
 }
 impl Decodable for Smoothing {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<Smoothing, D::Error> {
-        	decoder.read_struct("Smoothing", 3us, |d|
+        	decoder.read_struct("Smoothing", 3, |d|
         		Result::Ok(Smoothing{
-        			type_: match d.read_struct_field("type", 0us, Decodable::decode) {
+        			type_: match d.read_struct_field("type", 0, Decodable::decode) {
 					Ok(v) => v,
 					Err(e) => return Err(e) },
-				time_ms: match d.read_struct_field("time_ms", 1us,
+				time_ms: match d.read_struct_field("time_ms", 1,
 					Decodable::decode)
 				{
 					Ok(v) => v,
 					Err(e) => return Err(e) },
-				update_frequency: match d.read_struct_field("updateFrequency", 2us,
+				update_frequency: match d.read_struct_field("updateFrequency", 2,
 					Decodable::decode)
 				{
 					Ok(v) => v,

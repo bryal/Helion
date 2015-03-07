@@ -48,11 +48,9 @@ mod config;
 mod color;
 mod capture;
 
+/// A special header is expected by the corresponding LED streaming code running on the Arduino.
+/// This only needs to be initialized once since the number of LEDs remains constant.
 fn new_pixel_buf_header(n_leds: u16) -> Vec<u8> {
-	// A special header is expected by the corresponding LED streaming code 
-	// running on the Arduino. This only needs to be initialized once because the number of  
-	// LEDs remains constant.
-
 	// In the two below, not sure why the -1 in `(n_leds - 1)` is needed,
 	// but that's how LEDstream on the Arduino expects it
 	let count_high = ((n_leds - 1) >> 8) as u8;  // LED count high byte
@@ -61,27 +59,28 @@ fn new_pixel_buf_header(n_leds: u16) -> Vec<u8> {
 		'A' as u8,
 		'd' as u8,
 		'a' as u8,
-
 		count_high,
 		count_low,
-
 		count_high ^ count_low ^ 0x55, // Checksum
 	]
 }
 
+/// A timer to track time passed between refreshes. Can for example be used to limit frame rate.
 struct FrameTimer {
 	before: f64,
 	last_frame_dt: f64,
 }
 impl FrameTimer {
 	fn new() -> FrameTimer {
-		FrameTimer{ before: time::precise_time_s(), last_frame_dt: 0.0}
+		FrameTimer{ before: time::precise_time_s(), last_frame_dt: 0.0 }
 	}
 
+	/// For how long the previous frame lasted
 	fn last_frame_dt(&self) -> f64 {
 		self.last_frame_dt
 	}
 
+	/// Time passed since last tick
 	fn dt_to_now(&mut self) -> f64 {
 		let now = time::precise_time_s();
 		let dt = now - self.before;
@@ -93,6 +92,7 @@ impl FrameTimer {
 		}
 	}
 
+	/// An update/frame/refresh has occured; take the time.
 	fn tick(&mut self) {
 		let now = time::precise_time_s();
 		self.last_frame_dt = partial_max(now - self.before, 0.0).unwrap_or(0.0);
@@ -100,8 +100,8 @@ impl FrameTimer {
 	}
 }
 
-// Initialize a thread for serial writing given a serial port, baud rate, header to write before
-// each data write, and buffer with led colors.
+/// Initialize a thread for serial writing given a serial port, baud rate, header to write before
+/// each data write, and buffer with the actual led color data.
 fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec<RGB8>)
 	-> (Sender<Vec<RGB8>>, Receiver<Vec<RGB8>>)
 {
@@ -137,13 +137,13 @@ fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: V
 fn main() {
 	use capture::CaptureResult::*;
 
-	// Parse the HyperCon json config
 	let config = config::parse_config();
+
 	let leds = config.leds.as_slice();
 
-	let mut led_transformers: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
+	let mut led_transformers_list: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
 
-	// Add transforms from config to each led in matching vec
+	// Add color transforms from config to each led in matching vec
 	for transform_conf in config.color.transform.iter() {
 		let hsv_transformer = if !transform_conf.hsv.is_default() {
 			Some(&transform_conf.hsv)
@@ -159,8 +159,8 @@ fn main() {
 		} else { None };
 
 		for range in parse_led_indices(transform_conf.leds.as_slice(), leds.len()).iter() {
-			for transforms in led_transformers[*range].iter_mut() {
-				transforms.push((rgb_transformer.clone(), hsv_transformer));
+			for transformers in led_transformers_list[*range].iter_mut() {
+				transformers.push((rgb_transformer.clone(), hsv_transformer));
 			}
 		}
 	}
@@ -180,10 +180,8 @@ fn main() {
 	let mut capturer = Capturer::new();
 	capturer.frame.set_resize_dimensions(
 		(config.framegrabber.width, config.framegrabber.height));
-
 	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
 	capturer.set_timeout((1000.0 * capture_frame_interval) as u32);
-	let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
 	// Function to use when smoothing led colors
 	type SmoothFn = fn(&RGB8, RGB8, f64) -> RGB8;
@@ -191,8 +189,11 @@ fn main() {
 		"linear" => color::linear_smooth as SmoothFn,
 		_ => color::no_smooth as SmoothFn,
 	};
-	// max w/ 1 to avoid divide by zero
+
+	// max w/ 1 to avoid future divide by zero
 	let smooth_time_const = max(config.color.smoothing.time_ms, 1) as f64 / 1000.0;
+
+	let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
 	let mut capture_timer = FrameTimer::new();
 	let mut led_refresh_timer = FrameTimer::new();
@@ -201,10 +202,10 @@ fn main() {
 	loop {
 		led_refresh_timer.tick();
 
-		// Don't capture frame if going faster than frame limit,
+		// Don't capture new frame if going faster than frame limit,
 		// but still proceed to smooth leds
 		if capture_timer.dt_to_now() > capture_frame_interval {
-			// If something goes wrong, reuse last frame
+			// If something goes wrong, last frame is reused
 			match capturer.capture_frame() {
 				CrOk => (),
 				// Access Denied means we are probably in fullscreen app with
@@ -226,30 +227,27 @@ fn main() {
 		let mut out_pixels = write_thread_rx.recv().unwrap();
 
 		let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
-		for (to_pixel, out_buf_pixel) in leds.iter()
-			.map(|led| {
-				capturer.frame.average_color(&led)
-			})
-			.zip(led_transformers.iter())
-			.map(|(led_rgb, transformers)|
-				transformers.iter().fold(box led_rgb as Box<Pixel>,
-					|mut led_color, &(ref opt_rgb_tr, ref opt_hsv_tr)|
+		for (to_pixel, pixel_in_buf) in leds.iter()
+			.map(|led| capturer.frame.average_color(&led))
+			.zip(led_transformers_list.iter())
+			.map(|(average_color, color_transformers)|
+				color_transformers.iter().fold(box average_color as Box<Pixel>,
+					|mut acc_color, &(ref opt_rgb_tr, ref opt_hsv_tr)|
 				{
-					if let &Some(ref rgb_tr) = opt_rgb_tr {
-						led_color = box led_color.rgb_transform(rgb_tr)
+					if let Some(rgb_tr) = opt_rgb_tr.as_ref() {
+						acc_color = box acc_color.rgb_transform(rgb_tr)
 							as Box<Pixel>;
 					}
-					if let &Some(ref hsv_tr) = opt_hsv_tr {
-						box led_color.hsv_transform(hsv_tr)
-							as Box<Pixel>
+					if let Some(hsv_tr) = opt_hsv_tr.as_ref() {
+						box acc_color.hsv_transform(hsv_tr) as Box<Pixel>
 					} else {
-						led_color
+						acc_color
 					}
 				})
 				.to_rgb())
 			.zip(out_pixels.iter_mut())
 		{
-			*out_buf_pixel = smooth(out_buf_pixel, to_pixel, smooth_factor);
+			*pixel_in_buf = smooth(pixel_in_buf, to_pixel, smooth_factor);
 		}
 
 		let diag_aap = time::precise_time_s();
