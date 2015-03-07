@@ -207,17 +207,17 @@ fn main() {
 		if capture_timer.dt_to_now() > capture_frame_interval {
 			// If something goes wrong, last frame is reused
 			match capturer.capture_frame() {
-				CrOk => (),
+				Ok(_) => (),
 				// Access Denied means we are probably in fullscreen app with
 				// restricted access, sleep until we have access again
-				CrAccessDenied => {
+				Err(CrAccessDenied) => {
 					println!("Access Denied");
 					timer::sleep(Duration::seconds(2))
 				},
 				// Should be handled automatically in DXGCap
-				CrAccessLost => println!("Access to desktop duplication lost"),
-				CrTimeout => (),
-				CrFail => println!("Unexpected failure when capturing screen"),
+				Err(CrAccessLost) => println!("Access to desktop duplication lost"),
+				Err(CrTimeout) => (),
+				Err(_) => println!("Unexpected failure when capturing screen"),
 			}
 			capture_timer.tick();
 		}

@@ -164,43 +164,39 @@ impl Capturer {
 		(width as usize, height as usize)
 	}
 
-	pub fn capture_frame(&mut self) -> CaptureResult {
-		let mut buffer_size: size_t = 0;
-		let mut buffer = ptr::null_mut::<u8>();
+	pub fn capture_frame(&mut self) -> Result<(), CaptureResult> {
+		let mut shared_buf_size: size_t = 0;
+		let mut shared_buf = ptr::null_mut::<u8>();
 		let cr = unsafe{
-			get_frame_bytes(self.dxgi_manager, &mut buffer_size, &mut buffer) };
+			get_frame_bytes(self.dxgi_manager, &mut shared_buf_size, &mut shared_buf) };
 		if let CaptureResult::CrOk = cr  {
-			if buffer as *const _ == self.frame.data.as_ptr() {
-				CaptureResult::CrOk
+			if shared_buf.is_null() {
+				Err(CaptureResult::CrFail)
 			} else {
-				if buffer.is_null() {
-					CaptureResult::CrFail
-				} else {
-					// New buffer size, frame dimensions have changed
-					let (width, height) = self.get_output_dimensions();
-					self.frame.set_dimensions((width, height));
-					// Raw bytes are bothersome, so cast them to BGRA8 structs.
-					// BGRA8 contains only 4 fields, b, g, r, and a, and so,
-					// this works fine.
-					let bufsize = (buffer_size / DXGI_PIXEL_SIZE) as usize;
-					self.frame.data = unsafe {
-						Vec::from_raw_parts(buffer as *mut BGRA8,
-							bufsize,
-							bufsize)
-					};
-					CaptureResult::CrOk
+				let n_pixels = (shared_buf_size / DXGI_PIXEL_SIZE) as usize;
+				let mut pixel_buf: Vec<BGRA8> = Vec::with_capacity(n_pixels);
+
+				unsafe {
+					ptr::copy(pixel_buf.as_mut_ptr(),
+						shared_buf as *const BGRA8,
+						n_pixels);
+					pixel_buf.set_len(n_pixels);
 				}
+
+				let dimensions = self.get_output_dimensions();
+				self.frame.set_dimensions(dimensions);
+
+				self.frame.data = pixel_buf;
+				Ok(())
 			}
 		} else {
-			cr
+			Err(cr)
 		}
 	}
 }
 impl Drop for Capturer {
 	fn drop(&mut self) {
 		unsafe {
-			let v = mem::replace(&mut self.frame.data, Vec::new());
-			mem::forget(v);
 			delete_dxgi_manager(self.dxgi_manager);
 			uninit_dxgi();
 		}
