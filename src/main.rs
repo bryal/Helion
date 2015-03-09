@@ -218,6 +218,17 @@ fn main() {
 				},
 				// Should be handled automatically in DXGCap
 				Err(CrAccessLost) => println!("Access to desktop duplication lost"),
+				Err(CrRefreshFailure) => {
+					println!("Refresh Failure");
+					loop {
+						if capturer.refresh_output() {
+							break
+						} else {
+							println!("Refresh Failure");
+							timer::sleep(Duration::seconds(2))
+						}
+					}
+				},
 				Err(CrTimeout) => (),
 				Err(_) => println!("Unexpected failure when capturing screen"),
 			}

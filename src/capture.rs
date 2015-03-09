@@ -15,6 +15,8 @@ pub enum CaptureResult {
 	CrAccessDenied,
 	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
 	CrAccessLost,
+	// Error when trying to refresh outputs after some failure.
+	CrRefreshFailure,
 	// AcquireNextFrame timed out.
 	CrTimeout,
 	// General/Unexpected failure
@@ -36,6 +38,8 @@ extern {
 	fn set_capture_source(dxgi_manager: *mut c_void, cs: u16);
 
 	fn get_capture_source(dxgi_manager: *mut c_void) -> u16;
+
+	fn refresh_output(dxgi_manager: *mut c_void) -> bool;
 
 	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut u32, height: *mut u32);
 
@@ -99,14 +103,14 @@ impl ImageAnalyzer {
 			let (resize_width_ratio, resize_height_ratio) = (
 				self.image.width as f32 / self.resize_width as f32,
 				self.image.height as f32 / self.resize_height as f32);
-			let (start_y, end_y, start_x, end_x) = (
+			let (y1, y2, x1, x2) = (
 				(led.vscan.minimum * self.resize_height as f32) as usize,
 				(led.vscan.maximum * self.resize_height as f32) as usize,
 				(led.hscan.minimum * self.resize_width as f32) as usize,
 				(led.hscan.maximum * self.resize_width as f32) as usize);
 			let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-			for row in start_y..end_y {
-				for col in start_x..end_x {
+			for row in y1..y2 {
+				for col in x1..x2 {
 					let pixel = &self.image.pixels[(
 						row as f32 * resize_height_ratio *
 						self.image.width as f32 +
@@ -117,7 +121,7 @@ impl ImageAnalyzer {
 				}
 			}
 
-			let n_of_pixels = ((end_x - start_x) * (end_y - start_y)) as u64;
+			let n_of_pixels = ((x2 - x1) * (y2 - y1)) as u64;
 			RGB8{r: (r_sum/n_of_pixels) as u8,
 				g: (g_sum/n_of_pixels) as u8,
 				b: (b_sum/n_of_pixels) as u8 }
@@ -154,6 +158,10 @@ impl Capturer {
 		unsafe { get_capture_source(self.dxgi_manager) }
 	}
 
+	pub fn refresh_output(&mut self) -> bool {
+		unsafe { refresh_output(self.dxgi_manager) }
+	}
+
 	pub fn get_device_resolution(&self) -> (u32, u32) {
 		let (mut width, mut height) = (0, 0);
 		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
@@ -163,6 +171,7 @@ impl Capturer {
 	pub fn capture_frame(&mut self) -> Result<Image, CaptureResult> {
 		let mut shared_buf_size: size_t = 0;
 		let mut shared_buf = ptr::null_mut::<u8>();
+		
 		let cr = unsafe{
 			get_frame_bytes(self.dxgi_manager, &mut shared_buf_size, &mut shared_buf) };
 		if let CaptureResult::CrOk = cr  {
