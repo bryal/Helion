@@ -211,7 +211,7 @@ fn main() {
 			match capturer.capture_frame() {
 				Ok(frame) => {frame_analyzer.swap_slotted(frame);},
 				// Access Denied means we are probably in fullscreen app with
-				// restricted access, sleep until we have access again
+				// restricted access, wait for access
 				Err(CrAccessDenied) => {
 					println!("Access Denied");
 					timer::sleep(Duration::seconds(2))
@@ -257,7 +257,7 @@ fn main() {
 						acc_color
 					}
 				})
-				.to_rgb())
+					.to_rgb())
 			.zip(out_pixels.iter_mut())
 		{
 			*pixel_in_buf = smooth(pixel_in_buf, to_pixel, smooth_factor);

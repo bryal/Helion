@@ -58,6 +58,8 @@ fn uninit_dxgi() {
 	unsafe { uninit(); }
 }
 
+/// Representation of an image as a vector of 32-bit BGRA pixels,
+/// coupled with image dimensions
 #[derive(Clone)]
 struct Image {
 	width: u32, height: u32,
@@ -69,6 +71,9 @@ impl Image {
 	}
 }
 
+/// An analyzer with a slot for an image to be analyzed. `resize_width` and `resize_height` specify
+/// what resolution to use when analyzing the image. Often this decides number of rows/cols to skip.
+/// Analysis that may be done is such as calculating average color of a region of the image.
 #[derive(Clone)]
 pub struct ImageAnalyzer {
 	image: Image,
@@ -76,13 +81,15 @@ pub struct ImageAnalyzer {
 }
 impl ImageAnalyzer {
 	pub fn new() -> ImageAnalyzer {
-		ImageAnalyzer{ image: Image::new(), resize_width: 0, resize_height: 0 }
+		ImageAnalyzer{ image: Image::new(), resize_width: 1, resize_height: 1 }
 	}
 
+	/// Swap the image slotted in the analyzer for a new one. Return the old one.
 	pub fn swap_slotted(&mut self, new: Image) -> Image {
 		mem::replace(&mut self.image, new)
 	}
 
+	/// Change the dimensions to work with when analyzing
 	pub fn set_resize_dimensions(&mut self, (resize_width, resize_height): (u32, u32)) {
 		self.resize_width = if resize_width == 0 {
 			self.image.width
@@ -96,6 +103,7 @@ impl ImageAnalyzer {
 		};
 	}
 
+	/// Calculate the average color of `self.image` for region given by `led`
 	pub fn average_color(&self, led: &Led) -> RGB8 {
 		if self.image.pixels.len() == 0 {
 			RGB8{ r: 0, g: 0, b: 0 }
@@ -129,10 +137,14 @@ impl ImageAnalyzer {
 	}
 }
 
+/// A screen capturer for capturing the contents of a monitor.
+/// Currently this is not much more than a ffi wrapper for the DXGCap dxgi manager,
+/// and, as such, does not support capturing many fullscreen games, especially directx ones.
 pub struct Capturer {
 	dxgi_manager: *mut c_void,
 }
 impl Capturer {
+	/// Initialize DXGCap and construct a new `Capturer` with a new dxgi manager
 	pub fn new() -> Capturer {
 		init_dxgi();
 		let manager = unsafe { create_dxgi_manager() };
@@ -144,30 +156,40 @@ impl Capturer {
 		}
 	}
 
+	/// Specify the amount of time to wait for new frame before returning.
 	pub fn set_timeout(&mut self, timeout: u32) {
 		unsafe { set_timeout(self.dxgi_manager, timeout) }
 	}
 
+	/// Specify which monitor to capture from.
+	/// A value of `0` results in capture of primary monitor.
+	/// In windows, value of `cs` corresponds to monitor IDs in `Display\Screen Resolution`
 	#[allow(dead_code)]
 	pub fn set_capture_source(&mut self, cs: u16) {
 		unsafe { set_capture_source(self.dxgi_manager, cs) }
 	}
 
+	/// Return index of current capture source
 	#[allow(dead_code)]
 	pub fn get_capture_source(&mut self) -> u16 {
 		unsafe { get_capture_source(self.dxgi_manager) }
 	}
 
+	/// Manually refresh dxgi output adapters. May be needed if access to desktop duplication
+	/// is lost, but DXGCap did not fix it automatically.
 	pub fn refresh_output(&mut self) -> bool {
 		unsafe { refresh_output(self.dxgi_manager) }
 	}
 
-	pub fn get_device_resolution(&self) -> (u32, u32) {
+	/// Get the display resolution of selected output device.
+	pub fn get_display_resolution(&self) -> (u32, u32) {
 		let (mut width, mut height) = (0, 0);
 		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
 		(width, height)
 	}
 
+	/// Capture a frame from the capture source, and return captured bytes as an `Image`.
+	/// On success, return an `Image`, otherwise, return the CaptureResult indicating error type
 	pub fn capture_frame(&mut self) -> Result<Image, CaptureResult> {
 		let mut shared_buf_size: size_t = 0;
 		let mut shared_buf = ptr::null_mut::<u8>();
@@ -188,7 +210,7 @@ impl Capturer {
 					pixel_buf.set_len(n_pixels);
 				}
 
-				let (width, height) = self.get_device_resolution();
+				let (width, height) = self.get_display_resolution();
 
 				Ok(Image{ width: width, height: height, pixels: pixel_buf })
 			}
@@ -198,6 +220,7 @@ impl Capturer {
 	}
 }
 impl Drop for Capturer {
+	/// Manually delete the `dxgi_manager` and uninit the dxgi stuff inited on creation.
 	fn drop(&mut self) {
 		unsafe {
 			delete_dxgi_manager(self.dxgi_manager);
