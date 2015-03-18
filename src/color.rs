@@ -7,7 +7,7 @@ use std::mem;
 static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects
 
 type ColorTransformerConfig = config::Transform;
-type HSVTransformer = config::HSV;
+pub type HSVTransformer = config::HSV;
 
 fn modulo(l: f32, r: f32) -> f32 {
 	if l >= 0.0 {
@@ -19,9 +19,9 @@ fn modulo(l: f32, r: f32) -> f32 {
 
 #[derive(Clone)]
 pub struct RgbTransformer<'a> {
-	pub r: &'a config::ColorSettings,
-	pub g: &'a config::ColorSettings,
-	pub b: &'a config::ColorSettings
+	pub r: &'a config::AdditiveColorConf,
+	pub g: &'a config::AdditiveColorConf,
+	pub b: &'a config::AdditiveColorConf
 }
 
 pub trait Pixel {

@@ -28,63 +28,46 @@ use std::path;
 
 use rustc_serialize::{json, Decoder, Decodable};
 
-/// type:       The type of the device or leds (known types for now are 'ws2801', 'ldp8806',
-///             'lpd6803', 'sedu', 'adalight', 'lightpack', 'test' and 'none')
-/// rate:       The baudrate of the output to the device
-/// colorOrder: The order of the color bytes ('rgb', 'rbg', 'bgr', etc.).
-#[derive(Clone)]
-struct DeviceConfig {
-	pub type_: String,
+/// Configuration of a serial output
+#[derive(Clone, RustcDecodable)]
+pub struct DeviceConfig {
+	/// The baudrate of the output to the device
 	pub rate: u32,
+	/// The address of the serial output.
+	///
+	/// On Windows, this is something like `COM42`. On Linux, `/dev/ttys42`
 	pub output: String,
-	pub color_order: String
-}
-impl Decodable for DeviceConfig {
-	fn decode<D: Decoder>(decoder: &mut D) -> Result<DeviceConfig, D::Error> {
-		decoder.read_struct("DeviceConfig", 3, |d|
-			Result::Ok(DeviceConfig{
-				type_: match d.read_struct_field("type", 0, Decodable::decode) {
-					Ok(v) => v,
-					Err(e) => return Err(e) },
-				rate: match d.read_struct_field("rate", 1, Decodable::decode) {
-					Ok(v) => v,
-					Err(e) => return Err(e) },
-				output: match d.read_struct_field("output", 0, Decodable::decode) {
-					Ok(v) => v,
-					Err(e) => return Err(e) },
-				color_order: match d.read_struct_field("colorOrder", 2,
-					Decodable::decode)
-				{
-					Ok(v) => v,
-					Err(e) => return Err(e) }}))
-	}
 }
 
-/// saturationGain: The gain adjustement of the saturation
-/// valueGain:      The gain adjustement of the value
+/// Color configuration in the format of HSV, Hue Saturation Value
 #[derive(RustcDecodable, Clone)]
 pub struct HSV {
+	/// The gain adjustement of the saturation
 	pub saturationGain: f32,
+	/// The gain adjustement of the value
 	pub valueGain: f32,
 }
 impl HSV {
+	/// Test if config values are same as default values
 	pub fn is_default(&self) -> bool {
 		self.saturationGain == 1.0 && self.valueGain == 1.0
 	}
 }
 
-/// threshold:  The minimum required input value for the channel to be on (else zero)
-/// gamma:      The gamma-curve correction factor
-/// blacklevel: The lowest possible value (when the channel is black)
-/// whitelevel: The highest possible value (when the channel is white)
+/// Color configuration for additive color models such as RGB
 #[derive(RustcDecodable, Clone)]
-pub struct ColorSettings {
+pub struct AdditiveColorConf {
+	/// The minimum required input value for the channel to be on (else zero)
 	pub threshold: f32,
+	/// The gamma-curve correction factor
 	pub gamma: f32,
+	/// The lowest possible value (when the channel is black)
 	pub blacklevel: f32,
+	/// The highest possible value (when the channel is white)
 	pub whitelevel: f32
 }
-impl ColorSettings {
+impl AdditiveColorConf {
+	/// Test if config values are same as default values
 	pub fn is_default(&self) -> bool {
 		self.threshold == 0.0
 			&& self.gamma == 1.0
@@ -93,26 +76,32 @@ impl ColorSettings {
 	}
 }
 
-/// leds:           The indices (or index ranges) of the leds to which this color transform applies
-///                 (eg '0-5, 9, 11, 12-17'). The indices are zero based.
-/// hsv:            The manipulation in the Hue-Saturation-Value color domain
-/// red/green/blue: The manipulation in the Red-Green-Blue color domain
+/// Transformation config of the colors of specific leds
 #[derive(RustcDecodable, Clone)]
 pub struct Transform {
+	/// The indices (or index ranges) of the leds to which this color transform applies,
+	/// e.g. `"0-5, 9, 11, 12-17"`.
+	///
+	/// Indices start from zero.
 	pub leds: String,
+	/// Color manipulation in the Hue-Saturation-Value color domain
 	pub hsv: HSV,
-	pub red: ColorSettings,
-	pub green: ColorSettings,
-	pub blue: ColorSettings
+	/// Manipulation red color in the RGB domain
+	pub red: AdditiveColorConf,
+	/// Manipulation green color in the RGB domain
+	pub green: AdditiveColorConf,
+	/// Manipulation blue color in the RGB domain
+	pub blue: AdditiveColorConf
 }
 
-/// type:            The type of smoothing algorithm ('linear' or 'none')
-/// time_ms:         The time constant for smoothing algorithm in milliseconds
-/// updateFrequency: The update frequency of the leds in Hz
+/// Led color smoothing config
 #[derive(Clone)]
-struct Smoothing {
+pub struct Smoothing {
+	/// The type of smoothing algorithm ('linear' or 'none')
 	pub type_: String,
+	/// Time constant for the smoothing algorithm in milliseconds
 	pub time_ms: u32,
+	/// The update frequency of the leds in Hz
 	pub update_frequency: f64
 }
 impl Decodable for Smoothing {
@@ -135,44 +124,45 @@ impl Decodable for Smoothing {
 	}
 }
 
-/// Color manipulation configuration used to tune the output colors to specific surroundings. 
-/// transform: A list of color-transforms
-/// smoothing: Smoothing of the colors in the time-domain        
+/// Color manipulation config used to tune the output colors to specific surroundings. 
 #[derive(RustcDecodable, Clone)]
-struct ColorsManipulation {
+pub struct ColorsManipulation {
+	/// A list of color transforms
 	pub transform: Vec<Transform>,
+	/// Smoothing of the colors in the time domain
 	pub smoothing: Smoothing
 }
 
+/// The fractional part of an image along an axis (minimum and maximum inclusive)
 #[derive(RustcDecodable, Clone, Debug)]
-struct LedAxisPosFactor {
+pub struct LedAxisPos {
 	pub minimum: f32,
 	pub maximum: f32
 }
 
-/// hscan: The fractional part of the image along the horizontal used for the averaging 
-///        (minimum and maximum inclusive)
-/// vscan: The fractional part of the image along the vertical used for the averaging 
-///        (minimum and maximum inclusive)
+/// The region of a monitor to capture for an led
 #[derive(RustcDecodable, Clone, Debug)]
-pub struct Led {
-	pub hscan: LedAxisPosFactor,
-	pub vscan: LedAxisPosFactor
+pub struct Region {
+	/// The fractional part of the image along the horizontal axis
+	pub hscan: LedAxisPos,
+	/// The fractional part of the image along the vertical axis
+	pub vscan: LedAxisPos
 }
 
-/// width:        The width of the grabbed frames [pixels]
-/// height:       The height of the grabbed frames [pixels]
-/// frequency_Hz: The frequency of the frame grab [Hz]
+/// Frame grabbing conf
 #[derive(RustcDecodable, Clone)]
-struct FrameGrabber {
+pub struct FrameGrabConf {
+	/// The width of the grabbed frames in pixels
 	pub width: u32,
+	/// The height of the grabbed frames in pixels
 	pub height: u32,
+	/// The frequency of the frame grab in Hz
 	pub frequency_Hz: f64
 }
 
-/// Struct to contain config generated by HyperCon, The Hyperion deamon configuration file builder
+/// Container of config generated by HyperCon
 #[derive(RustcDecodable, Clone)]
-struct LedsConfig  {
+pub struct LedsConfig {
 	// Device configuration. This only really applies on the RPi, so might never be used.
 	pub device: DeviceConfig,
 	/// Color manipulation configuration used to tune the output colors to specific
@@ -180,11 +170,12 @@ struct LedsConfig  {
 	pub color: ColorsManipulation,
 	/// The configuration for each individual led. This contains the specification of the area 
 	/// averaged of an input image for each led to determine its color.
-	pub leds: Vec<Led>,
+	pub leds: Vec<Region>,
 	///  The configuration for the frame-grabber
-	pub framegrabber: FrameGrabber
+	pub framegrabber: FrameGrabConf
 }
 
+/// Parse the HyperCon JSON config to useable struct
 pub fn parse_config() -> LedsConfig {
 	use std::io::Read;
 
@@ -221,6 +212,12 @@ pub fn parse_config() -> LedsConfig {
 	}
 }
 
+/// Parse string of comma separated indices or index ranges to vector of ranges
+///
+/// # Examples
+/// ```
+/// assert_eq!(parse_led_indices("3, 4-8, 0, 20-24", 10), vec![3..4, 4..9, 0..1, 20..25]);
+/// ```
 pub fn parse_led_indices(indices_str: &str, total_n_leds: usize) -> Vec<Range<usize>> {
 	if indices_str == "*" {
 		vec![0..total_n_leds]
@@ -245,4 +242,12 @@ pub fn parse_led_indices(indices_str: &str, total_n_leds: usize) -> Vec<Range<us
 			})
 			.collect()
 	}
+}
+
+#[test]
+fn parse_led_indices_test() {
+	assert_eq!(parse_led_indices("3, 4-8, 0, 20-24", 10), vec![3..4, 4..9, 0..1, 20..25]);
+	assert_eq!(parse_led_indices("*", 10), vec![0..10]);
+	assert_eq!(parse_led_indices("0, 1 - 5", 10), vec![0..1]);
+	assert_eq!(parse_led_indices("1-A", 10), vec![]);
 }

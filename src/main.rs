@@ -22,7 +22,7 @@
 
 // TODO: TESTS!
 
-#![feature(libc, core, std_misc, io, unboxed_closures, box_syntax, path, old_io, fs)]
+#![feature(libc, core, std_misc, box_syntax, old_io)]
 
 extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -44,9 +44,9 @@ use std::sync::mpsc::{Sender,
 use std::thread;
 use std::cmp::{max, partial_max};
 
-mod config;
-mod color;
-mod capture;
+pub mod config;
+pub mod color;
+pub mod capture;
 
 /// A special header is expected by the corresponding LED streaming code running on the Arduino.
 /// This only needs to be initialized once since the number of LEDs remains constant.

@@ -1,4 +1,4 @@
-use config::Led;
+use config::Region;
 use color::{RGB8, BGRA8};
 
 use libc::{c_void,
@@ -61,7 +61,7 @@ fn uninit_dxgi() {
 /// Representation of an image as a vector of 32-bit BGRA pixels,
 /// coupled with image dimensions
 #[derive(Clone)]
-struct Image {
+pub struct Image {
 	width: u32, height: u32,
 	pixels: Vec<BGRA8>,
 }
@@ -104,7 +104,7 @@ impl ImageAnalyzer {
 	}
 
 	/// Calculate the average color of `self.image` for region given by `led`
-	pub fn average_color(&self, led: &Led) -> RGB8 {
+	pub fn average_color(&self, led: &Region) -> RGB8 {
 		if self.image.pixels.len() == 0 {
 			RGB8{ r: 0, g: 0, b: 0 }
 		} else {
