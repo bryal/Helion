@@ -88,21 +88,23 @@ fn uninit_dxgi() {
 	unsafe { uninit(); }
 }
 
-/// Representation of an image as a vector of 32-bit BGRA pixels,
-/// coupled with image dimensions
+/// Representation of an image as a vector of BGRA8 pixels, coupled with image dimensions
 #[derive(Clone)]
 pub struct Image {
 	width: u32, height: u32,
 	pixels: Vec<BGRA8>,
 }
 impl Image {
+	/// Construct a new, empty image
 	fn new() -> Image {
 		Image{ width: 0, height: 0, pixels: Vec::new() }
 	}
 }
 
-/// An analyzer with a slot for an image to be analyzed. `resize_width` and `resize_height` specify
-/// what resolution to use when analyzing the image. Often this decides number of rows/cols to skip.
+/// An analyzer with a slot for an image to be analyzed.
+///
+/// `resize_width` and `resize_height` specify what resolution to use when analyzing the image.
+/// Often this decides number of rows/cols to skip.
 /// Analysis that may be done is such as calculating average color of a region of the image.
 #[derive(Clone)]
 pub struct ImageAnalyzer {
@@ -110,6 +112,7 @@ pub struct ImageAnalyzer {
 	resize_width: u32, resize_height: u32,
 }
 impl ImageAnalyzer {
+	/// Construct a new `ImageAnalyzer` with an empty image slotted and resize dimensions of 1
 	pub fn new() -> ImageAnalyzer {
 		ImageAnalyzer{ image: Image::new(), resize_width: 1, resize_height: 1 }
 	}
@@ -133,7 +136,7 @@ impl ImageAnalyzer {
 		};
 	}
 
-	/// Calculate the average color of `self.image` for region given by `led`
+	/// Calculate the average color for a region of slotted image given by `led`
 	pub fn average_color(&self, led: &Region) -> RGB8 {
 		if self.image.pixels.len() == 0 {
 			RGB8{ r: 0, g: 0, b: 0 }
@@ -168,7 +171,8 @@ impl ImageAnalyzer {
 }
 
 /// A screen capturer for capturing the contents of a monitor.
-/// Currently this is not much more than a ffi wrapper for the DXGCap dxgi manager,
+///
+/// Currently this is not much more than a ffi wrapper for the DXGCap dxgi manager
 /// and, as such, does not support capturing many fullscreen games, especially directx ones.
 pub struct Capturer {
 	dxgi_manager: *mut c_void,
@@ -206,20 +210,19 @@ impl Capturer {
 	}
 
 	/// Manually refresh dxgi output adapters. May be needed if access to desktop duplication
-	/// is lost, but DXGCap did not fix it automatically.
+	/// is lost and DXGCap did not fix it automatically.
 	pub fn refresh_output(&mut self) -> bool {
 		unsafe { refresh_output(self.dxgi_manager) }
 	}
 
-	/// Get the display resolution of selected output device.
+	/// Get the display resolution of current capture source.
 	pub fn get_display_resolution(&self) -> (u32, u32) {
 		let (mut width, mut height) = (0, 0);
 		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
 		(width, height)
 	}
 
-	/// Capture a frame from the capture source, and return captured bytes as an `Image`.
-	/// On success, return an `Image`, otherwise, return the CaptureResult indicating error type
+	/// Capture a frame from the capture source. Convert and return captured bytes as an `Image`
 	pub fn capture_frame(&mut self) -> Result<Image, CaptureError> {
 		let mut shared_buf_size: size_t = 0;
 		let mut shared_buf = ptr::null_mut::<u8>();
