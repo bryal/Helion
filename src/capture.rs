@@ -7,20 +7,21 @@ use libc::{c_void,
 use std::ptr;
 use std::mem;
 
+/// Enum of results returned by DXGCap
 #[repr(C)]
 #[allow(dead_code)]
-pub enum CaptureResult {
-	CrOk,
+enum DXGCaptureResult {
+	Ok,
 	// Could not duplicate output, access denied. Might be in protected fullscreen.
-	CrAccessDenied,
+	AccessDenied,
 	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
-	CrAccessLost,
+	AccessLost,
 	// Error when trying to refresh outputs after some failure.
-	CrRefreshFailure,
+	RefreshFailure,
 	// AcquireNextFrame timed out.
-	CrTimeout,
+	Timeout,
 	// General/Unexpected failure
-	CrFail,
+	Fail,
 }
 
 #[link(name = "DXGCap")]
@@ -45,7 +46,36 @@ extern {
 
 	// Returns DXGI status code, HRESULT
 	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
-		o_bytes: *mut *mut uint8_t) -> CaptureResult;
+		o_bytes: *mut *mut uint8_t) -> DXGCaptureResult;
+}
+
+/// Possible errors when capturing
+#[allow(dead_code)]
+pub enum CaptureError {
+	// Could not duplicate output, access denied. Might be in protected fullscreen.
+	AccessDenied,
+	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
+	AccessLost,
+	// Error when trying to refresh outputs after some failure.
+	RefreshFailure,
+	// AcquireNextFrame timed out.
+	Timeout,
+	// General/Unexpected failure
+	Fail,
+}
+impl CaptureError {
+	/// Try to represent the DXGCap capture result as a CaptureError
+	fn from_dxgcapture_result(cr: DXGCaptureResult) -> Option<CaptureError> {
+		use self::DXGCaptureResult as D;
+		match cr {
+			D::Ok => None,
+			D::AccessDenied => Some(CaptureError::AccessDenied),
+			D::AccessLost => Some(CaptureError::AccessLost),
+			D::RefreshFailure => Some(CaptureError::RefreshFailure),
+			D::Timeout => Some(CaptureError::Timeout),
+			D::Fail => Some(CaptureError::Fail),
+		}
+	}
 }
 
 static DXGI_PIXEL_SIZE: u64 = 4; // BGRA8 => 4 bytes, DXGI default
@@ -190,15 +220,15 @@ impl Capturer {
 
 	/// Capture a frame from the capture source, and return captured bytes as an `Image`.
 	/// On success, return an `Image`, otherwise, return the CaptureResult indicating error type
-	pub fn capture_frame(&mut self) -> Result<Image, CaptureResult> {
+	pub fn capture_frame(&mut self) -> Result<Image, CaptureError> {
 		let mut shared_buf_size: size_t = 0;
 		let mut shared_buf = ptr::null_mut::<u8>();
 		
 		let cr = unsafe{
 			get_frame_bytes(self.dxgi_manager, &mut shared_buf_size, &mut shared_buf) };
-		if let CaptureResult::CrOk = cr  {
+		if let DXGCaptureResult::Ok = cr  {
 			if shared_buf.is_null() {
-				Err(CaptureResult::CrFail)
+				Err(CaptureError::Fail)
 			} else {
 				let n_pixels = (shared_buf_size / DXGI_PIXEL_SIZE) as usize;
 				let mut pixel_buf: Vec<BGRA8> = Vec::with_capacity(n_pixels);
@@ -215,7 +245,8 @@ impl Capturer {
 				Ok(Image{ width: width, height: height, pixels: pixel_buf })
 			}
 		} else {
-			Err(cr)
+			Err(CaptureError::from_dxgcapture_result(cr)
+				.expect("DXGCaptureResult was not an error"))
 		}
 	}
 }

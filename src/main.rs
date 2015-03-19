@@ -33,7 +33,7 @@ use config::parse_led_indices;
 use color::{RGB8,
 	RgbTransformer,
 	Pixel};
-use capture::{Capturer, ImageAnalyzer};
+use capture::{Capturer, ImageAnalyzer, CaptureError};
 
 use std::iter::repeat;
 use std::old_io::timer;
@@ -135,8 +135,6 @@ fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: V
 }
 
 fn main() {
-	use capture::CaptureResult::*;
-
 	let config = config::parse_config();
 
 	let leds = config.leds.as_slice();
@@ -209,16 +207,17 @@ fn main() {
 		if capture_timer.dt_to_now() > capture_frame_interval {
 			// If something goes wrong, last frame is reused
 			match capturer.capture_frame() {
-				Ok(frame) => {frame_analyzer.swap_slotted(frame);},
+				Ok(frame) => { frame_analyzer.swap_slotted(frame); },
 				// Access Denied means we are probably in fullscreen app with
 				// restricted access, wait for access
-				Err(CrAccessDenied) => {
+				Err(CaptureError::AccessDenied) => {
 					println!("Access Denied");
 					timer::sleep(Duration::seconds(2))
 				},
 				// Should be handled automatically in DXGCap
-				Err(CrAccessLost) => println!("Access to desktop duplication lost"),
-				Err(CrRefreshFailure) => {
+				Err(CaptureError::AccessLost) =>
+					println!("Access to desktop duplication lost"),
+				Err(CaptureError::RefreshFailure) => {
 					println!("Refresh Failure");
 					loop {
 						if capturer.refresh_output() {
@@ -229,7 +228,7 @@ fn main() {
 						}
 					}
 				},
-				Err(CrTimeout) => (),
+				Err(CaptureError::Timeout) => (),
 				Err(_) => println!("Unexpected failure when capturing screen"),
 			}
 			capture_timer.tick();
