@@ -153,9 +153,9 @@ fn main() {
 			transform_conf.green.is_default() &&
 			transform_conf.red.is_default())
 		{
-			Some(RgbTransformer{r: &transform_conf.red,
-				g: &transform_conf.green,
-				b: &transform_conf.blue})
+			Some(RgbTransformer::new(transform_conf.red.clone(),
+				transform_conf.green.clone(),
+				transform_conf.blue.clone()))
 		} else { None };
 
 		for range in parse_led_indices(transform_conf.leds.as_slice(), leds.len()).iter() {

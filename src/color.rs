@@ -1,4 +1,4 @@
-use super::config;
+use super::config::{self, AdditiveColorConf};
 
 use std::cmp::{max, min, partial_min};
 use std::num::Float;
@@ -9,6 +9,7 @@ static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects
 type ColorTransformerConfig = config::Transform;
 pub type HSVTransformer = config::HSV;
 
+/// Just a simple modulo function, since % in rust is remainder
 fn modulo(l: f32, r: f32) -> f32 {
 	if l >= 0.0 {
 		l % r
@@ -17,15 +18,27 @@ fn modulo(l: f32, r: f32) -> f32 {
 	}
 }
 
+/// Describes how to transform the red, green, and blue in an RGB pixel
 #[derive(Clone)]
-pub struct RgbTransformer<'a> {
-	pub r: &'a config::AdditiveColorConf,
-	pub g: &'a config::AdditiveColorConf,
-	pub b: &'a config::AdditiveColorConf
+pub struct RgbTransformer {
+	r: AdditiveColorConf,
+	g: AdditiveColorConf,
+	b: AdditiveColorConf
+}
+impl RgbTransformer {
+	/// Construct new RGB color transformer from configs for each channel
+	pub fn new(r: AdditiveColorConf, g: AdditiveColorConf, b: AdditiveColorConf)
+		-> RgbTransformer
+	{
+		RgbTransformer{ r: r, g: g, b: b }
+	}
 }
 
+/// Generic pixel. Transform the color without knowing the underlying format
 pub trait Pixel {
+	/// Convert the pixel to RGB8
 	fn to_rgb(&self) -> RGB8;
+	/// Convert the pixel to HSV
 	fn to_hsv(&self) -> HSV;
 
 	/// Transform the color of a pixel with RGB modifiers.
@@ -57,8 +70,10 @@ pub trait Pixel {
 	}
 }
 
-// Must contain only the fields [b, g, r, a] in that order, since this struct is transmuted to from
-// DXGCap raw BGRA8 buffer.
+/// Color format transmuted to from raw DXGCap color buffer.
+///
+/// Must contain only the fields [b, g, r, a], in that order,
+/// or transmutation will behave unexpectedely
 #[derive(Clone)]
 pub struct BGRA8 {
 	pub b: u8,
@@ -67,6 +82,7 @@ pub struct BGRA8 {
 	pub a: u8
 }
 
+/// RGB pixel with 8 bits per color.
 #[derive(Clone, Debug)]
 pub struct RGB8 {
 	pub r: u8,
@@ -105,11 +121,12 @@ impl Pixel for RGB8 {
 	}
 }
 
+/// A pixel in the [HSV](http://en.wikipedia.org/wiki/HSL_and_HSV) color format
 #[derive(Clone, Debug)]
 pub struct HSV {
-	pub hue: f32,
-	pub saturation: f32,
-	pub value: f32
+	hue: f32,
+	saturation: f32,
+	value: f32
 }
 impl Pixel for HSV {
 	fn to_rgb(&self) -> RGB8 {
@@ -144,6 +161,7 @@ impl Pixel for HSV {
 	}
 }
 
+/// Convert RGB8 pixels to same pixels represented as raw bytes
 pub fn rgbs_to_bytes(mut v: Vec<RGB8>) -> Vec<u8> {
 	unsafe {
 		let new_len = v.len() * RGB_SIZE;
@@ -152,6 +170,7 @@ pub fn rgbs_to_bytes(mut v: Vec<RGB8>) -> Vec<u8> {
 	}
 }
 
+/// Convert the raw bytes of RGB8 pixels to actual RGB8 pixels
 pub fn bytes_to_rgbs(v: Vec<u8>) -> Vec<RGB8> {
 	unsafe {
 		let new_len = v.len() / RGB_SIZE;
@@ -161,10 +180,12 @@ pub fn bytes_to_rgbs(v: Vec<u8>) -> Vec<RGB8> {
 	}
 }
 
-// Smoothing functions for color transitions
+/// LED color smoothing function that does no smoothing
 pub fn no_smooth(_: &RGB8, to: RGB8, _: f64) -> RGB8 {
 	to
 }
+
+/// Linear smooth of LED colors with regards to time
 pub fn linear_smooth(from: &RGB8, to: RGB8, factor: f64) -> RGB8 {
 	if factor > 1.0 {
 		to
