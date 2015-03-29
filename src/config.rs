@@ -153,9 +153,9 @@ pub struct Region {
 #[derive(RustcDecodable, Clone)]
 pub struct FrameGrabConf {
 	/// The width of the grabbed frames in pixels
-	pub width: u32,
+	pub width: usize,
 	/// The height of the grabbed frames in pixels
-	pub height: u32,
+	pub height: usize,
 	/// The frequency of the frame grab in Hz
 	pub frequency_Hz: f64
 }

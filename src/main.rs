@@ -22,21 +22,21 @@
 
 // TODO: TESTS!
 
-#![feature(libc, core, std_misc, box_syntax, old_io)]
+#![feature(core, std_misc, box_syntax, thread_sleep)]
 
-extern crate libc;
 extern crate "rustc-serialize" as rustc_serialize;
 extern crate time;
 extern crate "serial-rust" as serial;
+extern crate dxgcap;
 
 use config::parse_led_indices;
 use color::{RGB8,
 	RgbTransformer,
 	Pixel};
-use capture::{Capturer, ImageAnalyzer, CaptureError};
+use capture::{Capturer, ImageAnalyzer };
 
+use dxgcap::CaptureError;
 use std::iter::repeat;
-use std::old_io::timer;
 use std::time::Duration;
 use std::sync::mpsc::{Sender,
 	Receiver,
@@ -177,7 +177,7 @@ fn main() {
 	
 	let mut capturer = Capturer::new();
 	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
-	capturer.set_timeout((1000.0 * capture_frame_interval) as u32);
+	capturer.set_timeout(Duration::microseconds((1_000_000.0 * capture_frame_interval) as i64));
 
 	let mut frame_analyzer = ImageAnalyzer::new();
 	frame_analyzer.set_resize_dimensions(
@@ -212,7 +212,7 @@ fn main() {
 				// restricted access, wait for access
 				Err(CaptureError::AccessDenied) => {
 					println!("Access Denied");
-					timer::sleep(Duration::seconds(2))
+					thread::sleep(Duration::seconds(2))
 				},
 				// Should be handled automatically in DXGCap
 				Err(CaptureError::AccessLost) =>
@@ -220,11 +220,11 @@ fn main() {
 				Err(CaptureError::RefreshFailure) => {
 					println!("Refresh Failure");
 					loop {
-						if capturer.refresh_output() {
+						if capturer.acquire_output_duplication().is_ok() {
 							break
 						} else {
 							println!("Refresh Failure");
-							timer::sleep(Duration::seconds(2))
+							thread::sleep(Duration::seconds(2))
 						}
 					}
 				},
@@ -276,7 +276,7 @@ fn main() {
 
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
-			timer::sleep(Duration::microseconds((time_left * 1_000_000.0) as i64));
+			thread::sleep(Duration::microseconds((time_left * 1_000_000.0) as i64));
 		}
 	}
 }

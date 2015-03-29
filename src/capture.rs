@@ -1,97 +1,14 @@
 use config::Region;
-use color::{RGB8, BGRA8};
+use color::RGB8;
 
-use libc::{c_void,
-	uint8_t,
-	size_t};
-use std::ptr;
+use dxgcap::{ DXGIManager, CaptureError, BGRA8 };
+use std::time::duration::Duration;
 use std::mem;
-
-/// Enum of results returned by DXGCap
-#[repr(C)]
-#[allow(dead_code)]
-enum DXGCaptureResult {
-	Ok,
-	// Could not duplicate output, access denied. Might be in protected fullscreen.
-	AccessDenied,
-	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
-	AccessLost,
-	// Error when trying to refresh outputs after some failure.
-	RefreshFailure,
-	// AcquireNextFrame timed out.
-	Timeout,
-	// General/Unexpected failure
-	Fail,
-}
-
-#[link(name = "DXGCap")]
-extern {
-	fn init();
-
-	fn uninit();
-
-	fn create_dxgi_manager() -> *mut c_void;
-
-	fn delete_dxgi_manager(dxgi_manager: *mut c_void);
-
-	fn set_timeout(dxgi_manager: *mut c_void, timeout: u32);
-
-	fn set_capture_source(dxgi_manager: *mut c_void, cs: u16);
-
-	fn get_capture_source(dxgi_manager: *mut c_void) -> u16;
-
-	fn refresh_output(dxgi_manager: *mut c_void) -> bool;
-
-	fn get_output_dimensions(dxgi_manager: *const c_void, width: *mut u32, height: *mut u32);
-
-	// Returns DXGI status code, HRESULT
-	fn get_frame_bytes(dxgi_manager: *mut c_void, o_size: *mut size_t,
-		o_bytes: *mut *mut uint8_t) -> DXGCaptureResult;
-}
-
-/// Possible errors when capturing
-#[allow(dead_code)]
-pub enum CaptureError {
-	// Could not duplicate output, access denied. Might be in protected fullscreen.
-	AccessDenied,
-	// Access to the duplicated output was lost. Likely, mode was changed e.g. window => full
-	AccessLost,
-	// Error when trying to refresh outputs after some failure.
-	RefreshFailure,
-	// AcquireNextFrame timed out.
-	Timeout,
-	// General/Unexpected failure
-	Fail,
-}
-impl CaptureError {
-	/// Try to represent the DXGCap capture result as a CaptureError
-	fn from_dxgcapture_result(cr: DXGCaptureResult) -> Option<CaptureError> {
-		use self::DXGCaptureResult as D;
-		match cr {
-			D::Ok => None,
-			D::AccessDenied => Some(CaptureError::AccessDenied),
-			D::AccessLost => Some(CaptureError::AccessLost),
-			D::RefreshFailure => Some(CaptureError::RefreshFailure),
-			D::Timeout => Some(CaptureError::Timeout),
-			D::Fail => Some(CaptureError::Fail),
-		}
-	}
-}
-
-static DXGI_PIXEL_SIZE: u64 = 4; // BGRA8 => 4 bytes, DXGI default
-
-/// Initiate windows stuff that DXGCap requires.
-fn init_dxgi() {
-	unsafe { init(); }
-}
-fn uninit_dxgi() {
-	unsafe { uninit(); }
-}
 
 /// Representation of an image as a vector of BGRA8 pixels, coupled with image dimensions
 #[derive(Clone)]
 pub struct Image {
-	width: u32, height: u32,
+	width: usize, height: usize,
 	pixels: Vec<BGRA8>,
 }
 impl Image {
@@ -109,7 +26,7 @@ impl Image {
 #[derive(Clone)]
 pub struct ImageAnalyzer {
 	image: Image,
-	resize_width: u32, resize_height: u32,
+	resize_width: usize, resize_height: usize,
 }
 impl ImageAnalyzer {
 	/// Construct a new `ImageAnalyzer` with an empty image slotted and resize dimensions of 1
@@ -123,7 +40,7 @@ impl ImageAnalyzer {
 	}
 
 	/// Change the dimensions to work with when analyzing
-	pub fn set_resize_dimensions(&mut self, (resize_width, resize_height): (u32, u32)) {
+	pub fn set_resize_dimensions(&mut self, (resize_width, resize_height): (usize, usize)) {
 		self.resize_width = if resize_width == 0 {
 			self.image.width
 		} else {
@@ -175,90 +92,46 @@ impl ImageAnalyzer {
 /// Currently this is not much more than a ffi wrapper for the DXGCap dxgi manager
 /// and, as such, does not support capturing many fullscreen games, especially directx ones.
 pub struct Capturer {
-	dxgi_manager: *mut c_void,
+	dxgi_manager: DXGIManager,
 }
 impl Capturer {
 	/// Initialize DXGCap and construct a new `Capturer` with a new dxgi manager
 	pub fn new() -> Capturer {
-		init_dxgi();
-		let manager = unsafe { create_dxgi_manager() };
-		if manager.is_null() {
-			uninit_dxgi();
-			panic!("Unexpected null pointer when constructing Capturer.")
-		} else {
-			Capturer{ dxgi_manager: manager }
-		}
+		Capturer{ dxgi_manager: DXGIManager::new(Duration::milliseconds(100)).unwrap() }
 	}
 
 	/// Specify the amount of time to wait for new frame before returning.
-	pub fn set_timeout(&mut self, timeout: u32) {
-		unsafe { set_timeout(self.dxgi_manager, timeout) }
+	pub fn set_timeout(&mut self, timeout: Duration) {
+		self.dxgi_manager.set_timeout(timeout)
 	}
 
 	/// Specify which monitor to capture from.
 	/// A value of `0` results in capture of primary monitor.
 	/// In windows, value of `cs` corresponds to monitor IDs in `Display\Screen Resolution`
 	#[allow(dead_code)]
-	pub fn set_capture_source(&mut self, cs: u16) {
-		unsafe { set_capture_source(self.dxgi_manager, cs) }
+	pub fn set_capture_source_index(&mut self, cs: usize) {
+		self.dxgi_manager.set_capture_source_index(cs)
 	}
 
 	/// Return index of current capture source
 	#[allow(dead_code)]
-	pub fn get_capture_source(&mut self) -> u16 {
-		unsafe { get_capture_source(self.dxgi_manager) }
+	pub fn get_capture_source_index(&mut self) -> usize {
+		self.dxgi_manager.get_capture_source_index()
 	}
 
 	/// Manually refresh dxgi output adapters. May be needed if access to desktop duplication
 	/// is lost and DXGCap did not fix it automatically.
-	pub fn refresh_output(&mut self) -> bool {
-		unsafe { refresh_output(self.dxgi_manager) }
-	}
-
-	/// Get the display resolution of current capture source.
-	pub fn get_display_resolution(&self) -> (u32, u32) {
-		let (mut width, mut height) = (0, 0);
-		unsafe { get_output_dimensions(self.dxgi_manager, &mut width, &mut height); }
-		(width, height)
+	pub fn acquire_output_duplication(&mut self) -> Result<(), ()> {
+		self.dxgi_manager.acquire_output_duplication()
 	}
 
 	/// Capture a frame from the capture source. Convert and return captured bytes as an `Image`
 	pub fn capture_frame(&mut self) -> Result<Image, CaptureError> {
-		let mut shared_buf_size: size_t = 0;
-		let mut shared_buf = ptr::null_mut::<u8>();
-		
-		let cr = unsafe{
-			get_frame_bytes(self.dxgi_manager, &mut shared_buf_size, &mut shared_buf) };
-		if let DXGCaptureResult::Ok = cr  {
-			if shared_buf.is_null() {
-				Err(CaptureError::Fail)
-			} else {
-				let n_pixels = (shared_buf_size / DXGI_PIXEL_SIZE) as usize;
-				let mut pixel_buf: Vec<BGRA8> = Vec::with_capacity(n_pixels);
+		let (pixel_buf, (width, height)) = match self.dxgi_manager.get_output_data() {
+			Ok(o) => o,
+			Err(e) => return Err(e)
+		};
 
-				unsafe {
-					ptr::copy(pixel_buf.as_mut_ptr(),
-						shared_buf as *const BGRA8,
-						n_pixels);
-					pixel_buf.set_len(n_pixels);
-				}
-
-				let (width, height) = self.get_display_resolution();
-
-				Ok(Image{ width: width, height: height, pixels: pixel_buf })
-			}
-		} else {
-			Err(CaptureError::from_dxgcapture_result(cr)
-				.expect("DXGCaptureResult was not an error"))
-		}
-	}
-}
-impl Drop for Capturer {
-	/// Manually delete the `dxgi_manager` and uninit the dxgi stuff inited on creation.
-	fn drop(&mut self) {
-		unsafe {
-			delete_dxgi_manager(self.dxgi_manager);
-			uninit_dxgi();
-		}
+		Ok(Image{ width: width, height: height, pixels: pixel_buf })
 	}
 }

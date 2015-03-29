@@ -15,3 +15,7 @@ git = "https://github.com/rust-lang/time"
 [dependencies.serial-rust]
 git = "https://github.com/bryal/serial-rust"
 # path = "../serial-rust"
+
+[dependencies.dxgcap]
+# git = "https://github.com/bryal/dxgcap-rs"
+path = "../dxgcap-rs"
