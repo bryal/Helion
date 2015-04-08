@@ -1,7 +1,6 @@
 use super::config::{self, AdditiveColorConf};
 
 use std::cmp::{max, min, partial_min};
-use std::num::Float;
 use std::mem;
 
 static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects

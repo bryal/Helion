@@ -22,11 +22,11 @@
 
 // TODO: TESTS!
 
-#![feature(core, std_misc, box_syntax, thread_sleep)]
+#![feature(core, std_misc)]
 
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize as rustc_serialize;
 extern crate time;
-extern crate "serial-rust" as serial;
+extern crate serial_rust as serial;
 extern crate dxgcap;
 
 use config::parse_led_indices;
@@ -116,8 +116,8 @@ fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: V
 	thread::spawn(move || loop {
 		let pixel_buf = color::rgbs_to_bytes(to_write_thread_rx.recv().unwrap());
 
-		match serial_con.write(header.as_slice()) {
-			Ok(hn) if hn == header.len() => match serial_con.write(pixel_buf.as_slice())
+		match serial_con.write(header.as_ref()) {
+			Ok(hn) if hn == header.len() => match serial_con.write(pixel_buf.as_ref())
 			{
 				Ok(bn) if bn == pixel_buf.len() => (),
 				Ok(_) => println!("Failed to write all bytes of RGB data"),
@@ -137,7 +137,7 @@ fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: V
 fn main() {
 	let config = config::parse_config();
 
-	let leds = config.leds.as_slice();
+	let leds: &[_] = config.leds.as_ref();
 
 	let mut led_transformers_list: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
 
@@ -156,8 +156,8 @@ fn main() {
 				transform_conf.blue.clone()))
 		} else { None };
 
-		for range in parse_led_indices(transform_conf.leds.as_slice(), leds.len()).iter() {
-			for transformers in led_transformers_list[*range].iter_mut() {
+		for range in parse_led_indices(transform_conf.leds.as_ref(), leds.len()).iter() {
+			for transformers in led_transformers_list[range.clone()].iter_mut() {
 				transformers.push((rgb_transformer.clone(), hsv_transformer));
 			}
 		}
@@ -185,7 +185,7 @@ fn main() {
 
 	// Function to use when smoothing led colors
 	type SmoothFn = fn(&RGB8, RGB8, f64) -> RGB8;
-	let smooth = match config.color.smoothing.type_.as_slice() {
+	let smooth = match config.color.smoothing.type_.as_ref() {
 		"linear" => color::linear_smooth as SmoothFn,
 		_ => color::no_smooth as SmoothFn,
 	};
@@ -212,7 +212,7 @@ fn main() {
 				// restricted access, wait for access
 				Err(CaptureError::AccessDenied) => {
 					println!("Access Denied");
-					thread::sleep(Duration::seconds(2))
+					thread::sleep_ms(2_000)
 				},
 				// Should be handled automatically in DXGCap
 				Err(CaptureError::AccessLost) =>
@@ -224,7 +224,7 @@ fn main() {
 							break
 						} else {
 							println!("Refresh Failure");
-							thread::sleep(Duration::seconds(2))
+							thread::sleep_ms(2_000)
 						}
 					}
 				},
@@ -243,15 +243,15 @@ fn main() {
 			.map(|led| frame_analyzer.average_color(&led))
 			.zip(led_transformers_list.iter())
 			.map(|(average_color, color_transformers)|
-				color_transformers.iter().fold(box average_color as Box<Pixel>,
+				color_transformers.iter().fold(Box::new(average_color) as Box<Pixel>,
 					|mut acc_color, &(ref opt_rgb_tr, ref opt_hsv_tr)|
 				{
 					if let Some(rgb_tr) = opt_rgb_tr.as_ref() {
-						acc_color = box acc_color.rgb_transform(rgb_tr)
+						acc_color = Box::new(acc_color.rgb_transform(rgb_tr))
 							as Box<Pixel>;
 					}
 					if let Some(hsv_tr) = opt_hsv_tr.as_ref() {
-						box acc_color.hsv_transform(hsv_tr) as Box<Pixel>
+						Box::new(acc_color.hsv_transform(hsv_tr)) as Box<Pixel>
 					} else {
 						acc_color
 					}
@@ -276,7 +276,7 @@ fn main() {
 
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
-			thread::sleep(Duration::microseconds((time_left * 1_000_000.0) as i64));
+			thread::sleep_ms(if time_left > 0.0 { time_left * 1_000.0 } else { 0.0 } as u32);
 		}
 	}
 }

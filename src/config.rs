@@ -199,7 +199,7 @@ pub fn parse_config() -> LedsConfig {
 		.filter(|l| !l.is_empty() && !l.starts_with("//"))
 		.collect::<String>();
 
-	match json::decode::<LedsConfig>(no_comments.as_slice()) {
+	match json::decode::<LedsConfig>(no_comments.as_ref()) {
 		Ok(o) => o,
 		Err(e) => {
 			println!("Error\n\
