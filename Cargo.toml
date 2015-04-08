@@ -12,10 +12,8 @@ rustc-serialize = "*"
 [dependencies.time]
 git = "https://github.com/rust-lang/time"
 
-[dependencies.serial-rust]
-git = "https://github.com/bryal/serial-rust"
-# path = "../serial-rust"
+[dependencies.se_rs_ial]
+git = "https://github.com/bryal/se-rs-ial"
 
 [dependencies.dxgcap]
-# git = "https://github.com/bryal/dxgcap-rs"
-path = "../dxgcap-rs"
+git = "https://github.com/bryal/dxgcap-rs"

@@ -26,7 +26,7 @@
 
 extern crate rustc_serialize as rustc_serialize;
 extern crate time;
-extern crate serial_rust as serial;
+extern crate se_rs_ial as serial;
 extern crate dxgcap;
 
 use config::parse_led_indices;
@@ -102,13 +102,12 @@ impl FrameTimer {
 
 /// Initialize a thread for serial writing given a serial port, baud rate, header to write before
 /// each data write, and buffer with the actual led color data.
-fn init_write_thread(port: String, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec<RGB8>)
+fn init_write_thread(port: &str, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec<RGB8>)
 	-> (Sender<Vec<RGB8>>, Receiver<Vec<RGB8>>)
 {
 	use std::io::Write;
 
-	let mut serial_con = serial::Connection::new(port, baud_rate);
-	serial_con.open().unwrap();
+	let mut serial_con = serial::Connection::new(port, baud_rate).unwrap();
 
 	let (from_write_thread_tx, from_write_thread_rx) = channel();
 	let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
@@ -171,7 +170,7 @@ fn main() {
 		// Skeleton for the output led pixel buffer to write to arduino
 		let out_pixels = repeat(RGB8{r: 0, g: 0, b: 0}).take(leds.len()).collect();
 
-		init_write_thread(config.device.output.clone(), config.device.rate.clone(),
+		init_write_thread(config.device.output.as_ref(), config.device.rate.clone(),
 			out_header, out_pixels)
 	};
 	
