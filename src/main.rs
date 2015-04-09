@@ -194,10 +194,17 @@ fn main() {
 
 	let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
+	println!("Helion - An LED streamer\n\
+		Number of LEDs: {}\n\
+		Resize resolution: {} x {}\n\
+		Capture rate: {} fps\n\
+		LED refresh rate: {} hz\n\
+		Serial port: {}",
+		leds.len(), config.framegrabber.width, config.framegrabber.height,
+		config.framegrabber.frequency_Hz, 1.0 / smooth_time_const, config.device.output);
+
 	let mut capture_timer = FrameTimer::new();
 	let mut led_refresh_timer = FrameTimer::new();
-	let mut diag_timer = FrameTimer::new();
-	let mut diag_i = 0;
 	loop {
 		led_refresh_timer.tick();
 
@@ -233,8 +240,6 @@ fn main() {
 			capture_timer.tick();
 		}
 
-		let diag_bap = time::precise_time_s();
-
 		let mut out_pixels = write_thread_rx.recv().unwrap();
 
 		let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
@@ -261,17 +266,7 @@ fn main() {
 			*pixel_in_buf = smooth(pixel_in_buf, to_pixel, smooth_factor);
 		}
 
-		let diag_aap = time::precise_time_s();
-
 		write_thread_tx.send(out_pixels).unwrap();
-
-		diag_i += 1;
-		if diag_i >= 120 {
-			diag_timer.tick();
-			println!("ap fps: {}", 1.0 / (diag_aap-diag_bap));
-			println!("avg fps: {}\n", 1.0 / (diag_timer.last_frame_dt() / 120.0));
-			diag_i = 0;
-		}
 
 		let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
 		if time_left > 0.0 {
