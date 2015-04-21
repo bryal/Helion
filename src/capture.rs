@@ -2,7 +2,6 @@ use config::Region;
 use color::RGB8;
 
 use dxgcap::{ DXGIManager, CaptureError, BGRA8 };
-use std::time::duration::Duration;
 use std::mem;
 
 /// Representation of an image as a vector of BGRA8 pixels, coupled with image dimensions
@@ -97,12 +96,12 @@ pub struct Capturer {
 impl Capturer {
 	/// Initialize DXGCap and construct a new `Capturer` with a new dxgi manager
 	pub fn new() -> Capturer {
-		Capturer{ dxgi_manager: DXGIManager::new(Duration::milliseconds(100)).unwrap() }
+		Capturer{ dxgi_manager: DXGIManager::new(100).unwrap() }
 	}
 
 	/// Specify the amount of time to wait for new frame before returning.
-	pub fn set_timeout(&mut self, timeout: Duration) {
-		self.dxgi_manager.set_timeout(timeout)
+	pub fn set_timeout_ms(&mut self, timeout_ms: u32) {
+		self.dxgi_manager.set_timeout_ms(timeout_ms)
 	}
 
 	/// Specify which monitor to capture from.
@@ -127,7 +126,7 @@ impl Capturer {
 
 	/// Capture a frame from the capture source. Convert and return captured bytes as an `Image`
 	pub fn capture_frame(&mut self) -> Result<Image, CaptureError> {
-		let (pixel_buf, (width, height)) = match self.dxgi_manager.get_output_data() {
+		let (pixel_buf, (width, height)) = match self.dxgi_manager.capture_frame() {
 			Ok(o) => o,
 			Err(e) => return Err(e)
 		};

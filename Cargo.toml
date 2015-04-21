@@ -1,19 +1,11 @@
 [package]
-
-name = "Helion"
-version = "0.1.2"
+name = "helion"
+version = "0.1.3"
 authors = ["bryal <96.bryal@gmail.com>"]
-
 build = "build.rs"
 
 [dependencies]
 rustc-serialize = "*"
-
-[dependencies.time]
-git = "https://github.com/rust-lang/time"
-
-[dependencies.se_rs_ial]
-git = "https://github.com/bryal/se-rs-ial"
-
-[dependencies.dxgcap]
-git = "https://github.com/bryal/dxgcap-rs"
+dxgcap = "*"
+se_rs_ial = "*"
+time = "*"

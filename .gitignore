@@ -6,3 +6,6 @@
 *.dat
 HyperCon.jar
 *.7z
+Helion.bat
+log.txt
+hyperion.config.json

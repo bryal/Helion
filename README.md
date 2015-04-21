@@ -1,8 +1,6 @@
 # Helion
 Ambilight clone for windows written in Rust, meant to be used with an Arduino running [LEDstream](https://github.com/adafruit/Adalight/tree/master/Arduino/LEDstream).
 
-Using the [DXGCap](https://github.com/bryal/DXGCap) library to capture the screen in Windows, this program analyzes the image and sends resulting LED data to the Arduino.
-
 [Test video](https://www.youtube.com/watch?v=3ZARz9ELfA4&feature=youtu.be)
 
 
@@ -44,22 +42,9 @@ Notes about config sections:
 
 
 # Building
-Dependencies:
+
 ```
-Helion
-|-- DXGCap
-|-- serial-rust
-|   |-- serial-C
+cargo build --release
 ```
 
 Only Windows is supported at this time, as DXGCap is Windows only and I have not yet added support for any linux screen capturing.
-
-## Windows
-
-1. Build DXGCap and serial-C as dlls
-2. Place DXGCap.dll and serial_c.dll in project root.
-3. `cargo build --release`
-4. ???
-5. Profit
-
-Note: While static linking would've been preferred, static libs, Windows, Rust, and x64 does not go nicely together. If you do succed building using static libs, please tell me how you did it!

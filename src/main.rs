@@ -22,7 +22,7 @@
 
 // TODO: TESTS!
 
-#![feature(core, std_misc)]
+#![feature(core)]
 
 extern crate rustc_serialize as rustc_serialize;
 extern crate time;
@@ -37,7 +37,6 @@ use capture::{Capturer, ImageAnalyzer };
 
 use dxgcap::CaptureError;
 use std::iter::repeat;
-use std::time::Duration;
 use std::sync::mpsc::{Sender,
 	Receiver,
 	channel};
@@ -176,7 +175,7 @@ fn main() {
 	
 	let mut capturer = Capturer::new();
 	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
-	capturer.set_timeout(Duration::microseconds((1_000_000.0 * capture_frame_interval) as i64));
+	capturer.set_timeout_ms((1_000.0 * capture_frame_interval) as u32);
 
 	let mut frame_analyzer = ImageAnalyzer::new();
 	frame_analyzer.set_resize_dimensions(
