@@ -106,7 +106,8 @@ fn init_write_thread(port: &str, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec
 {
 	use std::io::Write;
 
-	let mut serial_con = serial::Connection::new(port, baud_rate).unwrap();
+	let baud_rate = serial::BaudRate::from_u32(baud_rate).unwrap();
+	let mut serial_con = serial::Connection::open(port, baud_rate).unwrap();
 
 	let (from_write_thread_tx, from_write_thread_rx) = channel();
 	let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
@@ -114,8 +115,8 @@ fn init_write_thread(port: &str, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec
 	thread::spawn(move || loop {
 		let pixel_buf = color::rgbs_to_bytes(to_write_thread_rx.recv().unwrap());
 
-		match serial_con.write(header.as_ref()) {
-			Ok(hn) if hn == header.len() => match serial_con.write(pixel_buf.as_ref())
+		match serial_con.write(&header) {
+			Ok(hn) if hn == header.len() => match serial_con.write(&pixel_buf)
 			{
 				Ok(bn) if bn == pixel_buf.len() => (),
 				Ok(_) => println!("Failed to write all bytes of RGB data"),
@@ -135,7 +136,7 @@ fn init_write_thread(port: &str, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec
 fn main() {
 	let config = config::parse_config();
 
-	let leds: &[_] = config.leds.as_ref();
+	let leds: &[_] = &config.leds;
 
 	let mut led_transformers_list: Vec<_> = repeat(Vec::with_capacity(2)).take(leds.len()).collect();
 
@@ -154,7 +155,7 @@ fn main() {
 				transform_conf.blue.clone()))
 		} else { None };
 
-		for range in parse_led_indices(transform_conf.leds.as_ref(), leds.len()).iter() {
+		for range in parse_led_indices(&transform_conf.leds, leds.len()).iter() {
 			for transformers in led_transformers_list[range.clone()].iter_mut() {
 				transformers.push((rgb_transformer.clone(), hsv_transformer));
 			}
@@ -169,8 +170,7 @@ fn main() {
 		// Skeleton for the output led pixel buffer to write to arduino
 		let out_pixels = repeat(RGB8{r: 0, g: 0, b: 0}).take(leds.len()).collect();
 
-		init_write_thread(config.device.output.as_ref(), config.device.rate.clone(),
-			out_header, out_pixels)
+		init_write_thread(&config.device.output, config.device.rate, out_header, out_pixels)
 	};
 	
 	let mut capturer = Capturer::new();

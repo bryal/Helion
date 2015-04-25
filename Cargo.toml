@@ -7,5 +7,7 @@ build = "build.rs"
 [dependencies]
 rustc-serialize = "*"
 dxgcap = "*"
-se_rs_ial = "*"
 time = "*"
+
+[dependencies.se_rs_ial]
+git = "https://github.com/bryal/se-rs-ial"
