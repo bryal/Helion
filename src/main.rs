@@ -23,7 +23,7 @@
 // TODO: TESTS!
 
 extern crate rustc_serialize as rustc_serialize;
-extern crate time;
+extern crate clock_ticks;
 extern crate se_rs_ial as serial;
 extern crate dxgcap;
 
@@ -82,7 +82,7 @@ struct FrameTimer {
 }
 impl FrameTimer {
 	fn new() -> FrameTimer {
-		FrameTimer{ before: time::precise_time_s(), last_frame_dt: 0.0 }
+		FrameTimer{ before: clock_ticks::precise_time_s(), last_frame_dt: 0.0 }
 	}
 
 	/// For how long the previous frame lasted
@@ -92,7 +92,7 @@ impl FrameTimer {
 
 	/// Time passed since last tick
 	fn dt_to_now(&mut self) -> f64 {
-		let now = time::precise_time_s();
+		let now = clock_ticks::precise_time_s();
 		let dt = now - self.before;
 		if dt >= 0.0 {
 			dt
@@ -104,7 +104,7 @@ impl FrameTimer {
 
 	/// An update/frame/refresh has occured; take the time.
 	fn tick(&mut self) {
-		let now = time::precise_time_s();
+		let now = clock_ticks::precise_time_s();
 		self.last_frame_dt = partial_max(now - self.before, 0.0, 0.0);
 		self.before = now;
 	}
