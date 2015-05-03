@@ -47,4 +47,6 @@ Notes about config sections:
 cargo build --release
 ```
 
-Only Windows is supported at this time, as DXGCap is Windows only and I have not yet added support for any linux screen capturing.
+Helion depends on se_rs_ial, which is unstable. As such, Rust Nightly is needed to build the software.
+
+Only Windows is supported at this time, as dxgcap is Windows only and I have not yet added support for any linux screen capturing.

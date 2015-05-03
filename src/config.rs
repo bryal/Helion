@@ -26,7 +26,7 @@ use std::fs::File;
 use std::ops::Range;
 use std::path;
 
-use rustc_serialize::{json, Decoder, Decodable};
+use rustc_serialize::{ json, Decoder, Decodable };
 
 /// Configuration of a serial output
 #[derive(Clone, RustcDecodable)]
@@ -124,7 +124,7 @@ impl Decodable for Smoothing {
 	}
 }
 
-/// Color manipulation config used to tune the output colors to specific surroundings. 
+/// Color manipulation config used to tune the output colors to specific surroundings.
 #[derive(RustcDecodable, Clone)]
 pub struct ColorsManipulation {
 	/// A list of color transforms
@@ -168,7 +168,7 @@ pub struct LedsConfig {
 	/// Color manipulation configuration used to tune the output colors to specific
 	/// surroundings. The configuration contains a list of color-transforms.
 	pub color: ColorsManipulation,
-	/// The configuration for each individual led. This contains the specification of the area 
+	/// The configuration for each individual led. This contains the specification of the area
 	/// averaged of an input image for each led to determine its color.
 	pub leds: Vec<Region>,
 	///  The configuration for the frame-grabber

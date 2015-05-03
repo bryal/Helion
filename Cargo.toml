@@ -1,6 +1,6 @@
 [package]
 name = "helion"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
 

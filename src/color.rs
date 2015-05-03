@@ -1,6 +1,6 @@
-use super::config::{self, AdditiveColorConf};
-
-use std::cmp::{max, min, partial_min};
+use config::{self, AdditiveColorConf};
+use partial_min;
+use std::cmp::{ max, min };
 use std::mem;
 
 static RGB_SIZE: usize = 3; // RGB8 => 3 bytes, what LEDstream expects
@@ -62,10 +62,11 @@ pub trait Pixel {
 	/// Transform the color of a pixel with HSV modifiers.
 	fn hsv_transform(&self, transformer: &HSVTransformer) -> HSV {
 		let hsv = self.to_hsv();
-		HSV{hue: hsv.hue,
-			saturation: partial_min(1.0, hsv.saturation * transformer.saturationGain)
-				.unwrap_or(1.0),
-			value: partial_min(1.0, hsv.value * transformer.valueGain).unwrap_or(1.0)}
+		HSV{
+			hue: hsv.hue,
+			saturation: partial_min(1.0, hsv.saturation * transformer.saturationGain, 1.0),
+			value: partial_min(1.0, hsv.value * transformer.valueGain, 1.0)
+		}
 	}
 }
 
@@ -142,7 +143,7 @@ impl Pixel for HSV {
 			let p = (val_255 * (1.0 - self.saturation)) as u8;
 			let q = (val_255 * (1.0 - self.saturation * factorial_part)) as u8;
 			let t = (val_255 * (1.0 - self.saturation * (1.0 - factorial_part))) as u8;
-			
+
 			let (r, g, b) = match sector {
 				0 => (v_8bit, t, p),
 				1 => (q, v_8bit, p),

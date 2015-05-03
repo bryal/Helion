@@ -22,30 +22,41 @@
 
 // TODO: TESTS!
 
-#![feature(core)]
-
 extern crate rustc_serialize as rustc_serialize;
 extern crate time;
 extern crate se_rs_ial as serial;
 extern crate dxgcap;
 
 use config::parse_led_indices;
-use color::{RGB8,
-	RgbTransformer,
-	Pixel};
-use capture::{Capturer, ImageAnalyzer };
+use color::{ RGB8, RgbTransformer, Pixel };
+use capture::{ Capturer, ImageAnalyzer };
 
 use dxgcap::CaptureError;
 use std::iter::repeat;
-use std::sync::mpsc::{Sender,
-	Receiver,
-	channel};
+use std::sync::mpsc::{ Sender, Receiver, channel };
 use std::thread;
-use std::cmp::{max, partial_max};
+use std::cmp::{ max, Ordering };
 
 pub mod config;
 pub mod color;
 pub mod capture;
+
+/// Returns smallest of `a` and `b` if there is one, else returns `expect`
+fn partial_min<T: PartialOrd>(a: T, b: T, expect: T) -> T {
+	match a.partial_cmp(&b) {
+		Some(Ordering::Less) | Some(Ordering::Equal) => a,
+		Some(Ordering::Greater) => b,
+		None => expect,
+	}
+}
+/// Returns greatest of `a` and `b` if there is one, else returns `expect`
+fn partial_max<T: PartialOrd>(a: T, b: T, expect: T) -> T {
+	match a.partial_cmp(&b) {
+		Some(Ordering::Greater) | Some(Ordering::Equal) => a,
+		Some(Ordering::Less) => b,
+		None => expect,
+	}
+}
 
 /// A special header is expected by the corresponding LED streaming code running on the Arduino.
 /// This only needs to be initialized once since the number of LEDs remains constant.
@@ -94,7 +105,7 @@ impl FrameTimer {
 	/// An update/frame/refresh has occured; take the time.
 	fn tick(&mut self) {
 		let now = time::precise_time_s();
-		self.last_frame_dt = partial_max(now - self.before, 0.0).unwrap_or(0.0);
+		self.last_frame_dt = partial_max(now - self.before, 0.0, 0.0);
 		self.before = now;
 	}
 }
@@ -111,7 +122,7 @@ fn init_write_thread(port: &str, baud_rate: u32, header: Vec<u8>, pixel_buf: Vec
 
 	let (from_write_thread_tx, from_write_thread_rx) = channel();
 	let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<RGB8>>();
-	
+
 	thread::spawn(move || loop {
 		let pixel_buf = color::rgbs_to_bytes(to_write_thread_rx.recv().unwrap());
 
@@ -172,7 +183,7 @@ fn main() {
 
 		init_write_thread(&config.device.output, config.device.rate, out_header, out_pixels)
 	};
-	
+
 	let mut capturer = Capturer::new();
 	let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
 	capturer.set_timeout_ms((1_000.0 * capture_frame_interval) as u32);
