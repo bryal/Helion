@@ -205,13 +205,17 @@ fn main() {
 	let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
 	println!("Helion - An LED streamer\n\
-		Number of LEDs: {}\n\
-		Resize resolution: {} x {}\n\
-		Capture rate: {} fps\n\
-		LED refresh rate: {} hz\n\
-		Serial port: {}",
-		leds.len(), config.framegrabber.width, config.framegrabber.height,
-		config.framegrabber.frequency_Hz, 1.0 / smooth_time_const, config.device.output);
+			Number of LEDs: {}\n\
+			Resize resolution: {} x {}\n\
+			Capture rate: {} fps\n\
+			LED refresh rate: {} hz\n\
+			Serial port: {}",
+		leds.len(),
+		config.framegrabber.width,
+		config.framegrabber.height,
+		config.framegrabber.frequency_Hz,
+		1.0 / led_refresh_interval,
+		config.device.output);
 
 	let mut capture_timer = FrameTimer::new();
 	let mut led_refresh_timer = FrameTimer::new();
