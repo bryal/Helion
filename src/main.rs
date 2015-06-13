@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 // TODO: TESTS!
+// TODO: Color shift
 
 extern crate rustc_serialize as rustc_serialize;
 extern crate clock_ticks;
@@ -28,7 +29,7 @@ extern crate se_rs_ial as serial;
 extern crate dxgcap;
 
 use config::parse_led_indices;
-use color::{ RGB8, RgbTransformer, Pixel };
+use color::{ RGB8, RgbTransformer, Color };
 use capture::{ Capturer, ImageAnalyzer };
 
 use dxgcap::CaptureError;
@@ -161,9 +162,11 @@ fn main() {
 			transform_conf.green.is_default() &&
 			transform_conf.red.is_default())
 		{
-			Some(RgbTransformer::new(transform_conf.red.clone(),
-				transform_conf.green.clone(),
-				transform_conf.blue.clone()))
+			Some(RgbTransformer{
+				r: transform_conf.red.clone(),
+				g: transform_conf.green.clone(),
+				b: transform_conf.blue.clone()
+			})
 		} else { None };
 
 		for range in parse_led_indices(&transform_conf.leds, leds.len()).iter() {
@@ -261,20 +264,16 @@ fn main() {
 			.map(|led| frame_analyzer.average_color(&led))
 			.zip(led_transformers_list.iter())
 			.map(|(average_color, color_transformers)|
-				color_transformers.iter().fold(Box::new(average_color) as Box<Pixel>,
-					|mut acc_color, &(ref opt_rgb_tr, ref opt_hsv_tr)|
-				{
-					if let Some(rgb_tr) = opt_rgb_tr.as_ref() {
-						acc_color = Box::new(acc_color.rgb_transform(rgb_tr))
-							as Box<Pixel>;
-					}
-					if let Some(hsv_tr) = opt_hsv_tr.as_ref() {
-						Box::new(acc_color.hsv_transform(hsv_tr)) as Box<Pixel>
-					} else {
-						acc_color
-					}
-				})
-					.to_rgb())
+				color_transformers.iter()
+					.map(|&(ref opt_rgb, ref opt_hsv)| (opt_rgb.as_ref(), opt_hsv.as_ref()))
+					.fold(Color::RGB(average_color), |acc_color, transformers| match transformers {
+						(Some(rgb_tr), Some(hsv_tr)) => Color::HSV(
+							hsv_tr.transform(rgb_tr.transform(acc_color.into_rgb()).to_hsv())),
+						(Some(rgb_tr), _) => Color::RGB(rgb_tr.transform(acc_color.into_rgb())),
+						(_, Some(hsv_tr)) => Color::HSV(hsv_tr.transform(acc_color.into_hsv())),
+						_ => acc_color
+					})
+					.into_rgb())
 			.zip(out_pixels.iter_mut())
 		{
 			*pixel_in_buf = smooth(pixel_in_buf, to_pixel, smooth_factor);

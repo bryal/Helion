@@ -1,6 +1,6 @@
 [package]
 name = "helion"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["bryal <96.bryal@gmail.com>"]
 
 [dependencies]
