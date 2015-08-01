@@ -22,6 +22,8 @@
 
 // TODO: TESTS!
 // TODO: Color shift
+// TODO: Support capturing a virtual desktop, multiple monotors together
+// TODO: Optional solid color or animation when there's no signal
 
 extern crate rustc_serialize as rustc_serialize;
 extern crate clock_ticks;
