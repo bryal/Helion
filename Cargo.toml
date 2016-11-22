@@ -1,13 +1,12 @@
+
 [package]
 name = "helion"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
 
 [dependencies]
-rustc-serialize = "*"
-dxgcap = "*"
-clock_ticks = "*"
-
-[dependencies.se_rs_ial]
-git = "https://github.com/bryal/se-rs-ial"
+rustc-serialize = "0.3"
+captrs = "0.1"
+clock_ticks = "0.0.6"
+serial = "0.3"

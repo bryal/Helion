@@ -1,3 +1,5 @@
 fn main() {
-	println!("cargo:rustc-link-search=native={}", "C:/Windows/System32/");
+    if cfg!(windows) {
+        println!("cargo:rustc-link-search=native={}", "C:/Windows/System32/");
+    }
 }
