@@ -46,6 +46,3 @@ Notes about config sections:
 ```
 cargo build --release
 ```
-
-
-Only Windows is supported at this time, as dxgcap is Windows only and I have not yet added support for any linux screen capturing.
