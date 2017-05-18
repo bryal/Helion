@@ -1,6 +1,6 @@
-use config::Region;
-use color::Rgb8;
 use captrs::Bgr8;
+use color::Rgb8;
+use config::Region;
 
 /// An analyzer with a slot for an image to be analyzed.
 ///
@@ -8,37 +8,38 @@ use captrs::Bgr8;
 /// Often this decides number of rows/cols to skip.
 /// Analysis that may be done is such as calculating average color of a region of the image.
 #[derive(Clone)]
-pub struct ImageAnalyzer {
-    pub data: Vec<Bgr8>,
+pub struct ImageAnalyzer<'i> {
+    pub data: &'i [Bgr8],
     pub width: usize,
     pub height: usize,
     resize_width: usize,
     resize_height: usize,
 }
-impl ImageAnalyzer {
+impl<'i> ImageAnalyzer<'i> {
     /// Construct a new `ImageAnalyzer` with an empty image slotted and resize dimensions of 1
-    pub fn new() -> ImageAnalyzer {
-        ImageAnalyzer {
-            data: Vec::new(),
-            width: 0,
-            height: 0,
-            resize_width: 1,
-            resize_height: 1,
-        }
-    }
-
-    /// Change the dimensions to work with when analyzing
-    pub fn set_resize_dimensions(&mut self, (resize_width, resize_height): (usize, usize)) {
-        self.resize_width = if resize_width == 0 {
-            self.width
+    pub fn new(data: &'i [Bgr8],
+               width: usize,
+               height: usize,
+               resize_width: usize,
+               resize_height: usize)
+               -> Self {
+        let resize_width = if resize_width == 0 {
+            width
         } else {
             resize_width
         };
-        self.resize_height = if resize_height == 0 {
-            self.height
+        let resize_height = if resize_height == 0 {
+            height
         } else {
             resize_height
         };
+        Self {
+            data: data,
+            width: width,
+            height: height,
+            resize_width: resize_width,
+            resize_height: resize_height,
+        }
     }
 
     /// Calculate the average color for a region of slotted image given by `led`
@@ -54,6 +55,7 @@ impl ImageAnalyzer {
                                     (led.hscan.minimum * self.resize_width as f32) as usize,
                                     (led.hscan.maximum * self.resize_width as f32) as usize);
             let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
+
             for row in y1..y2 {
                 for col in x1..x2 {
                     let i = row as f32 * resize_height_ratio * self.width as f32 +

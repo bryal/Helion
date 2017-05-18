@@ -5,8 +5,14 @@ version = "0.3.0"
 authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
 
+[features]
+profiling = ["cpuprofiler"]
+
 [dependencies]
 rustc-serialize = "0.3"
-captrs = "0.1"
+captrs = "0.2"
 clock_ticks = "0.0.6"
 serial = "0.3"
+
+# Optional dependencies
+cpuprofiler = { version = "0.0.3", optional = true }

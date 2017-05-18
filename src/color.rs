@@ -1,7 +1,7 @@
 use config::{self, AdditiveColorConf};
 use partial_min;
 use std::cmp::{max, min};
-use std::mem;
+use std::slice;
 
 static RGB_SIZE: usize = 3; // Rgb8 => 3 bytes, what LEDstream expects
 
@@ -24,7 +24,8 @@ impl RgbTransformer {
 
         for (channel, transformer) in channels.iter_mut().zip(transformers.iter()) {
             let c = (*channel as f32 / 255.0).powf(transformer.gamma) * transformer.whitelevel *
-                    (1.0 - transformer.blacklevel) + transformer.blacklevel;
+                    (1.0 - transformer.blacklevel) +
+                    transformer.blacklevel;
             *channel = (if c >= transformer.threshold { c } else { 0.0 } * 255.0) as u8;
         }
         Rgb8 {
@@ -73,11 +74,7 @@ impl Rgb8 {
 
         let value = max;
 
-        let saturation = if value == 0 {
-            0.0
-        } else {
-            chroma as f32 / value as f32
-        };
+        let saturation = if value == 0 { 0.0 } else { chroma as f32 / value as f32 };
 
         HSV {
             hue: hue,
@@ -112,46 +109,22 @@ impl HSV {
             let val = val as u8;
             match sector {
                 0 => {
-                    Rgb8 {
-                        r: val,
-                        g: t,
-                        b: p,
-                    }
+                    Rgb8 { r: val, g: t, b: p }
                 }
                 1 => {
-                    Rgb8 {
-                        r: q,
-                        g: val,
-                        b: p,
-                    }
+                    Rgb8 { r: q, g: val, b: p }
                 }
                 2 => {
-                    Rgb8 {
-                        r: p,
-                        g: val,
-                        b: t,
-                    }
+                    Rgb8 { r: p, g: val, b: t }
                 }
                 3 => {
-                    Rgb8 {
-                        r: p,
-                        g: q,
-                        b: val,
-                    }
+                    Rgb8 { r: p, g: q, b: val }
                 }
                 4 => {
-                    Rgb8 {
-                        r: t,
-                        g: p,
-                        b: val,
-                    }
+                    Rgb8 { r: t, g: p, b: val }
                 }
                 _ => {
-                    Rgb8 {
-                        r: val,
-                        g: p,
-                        b: q,
-                    }
+                    Rgb8 { r: val, g: p, b: q }
                 }
             }
         }
@@ -182,22 +155,8 @@ impl Color {
 }
 
 /// Represent Rgb8 colors as raw bytes
-pub fn rgbs_to_bytes(mut v: Vec<Rgb8>) -> Vec<u8> {
-    unsafe {
-        let new_len = v.len() * RGB_SIZE;
-        v.set_len(new_len);
-        mem::transmute(v)
-    }
-}
-
-/// Convert the raw bytes of Rgb8 pixels to actual Rgb8 pixels
-pub fn bytes_to_rgbs(v: Vec<u8>) -> Vec<Rgb8> {
-    unsafe {
-        let new_len = v.len() / RGB_SIZE;
-        let mut v_o: Vec<Rgb8> = mem::transmute(v);
-        v_o.set_len(new_len);
-        v_o
-    }
+pub fn rgbs_as_bytes(v: &[Rgb8]) -> &[u8] {
+    unsafe { slice::from_raw_parts(v.as_ptr() as *const _, v.len() * RGB_SIZE) }
 }
 
 /// LED color smoothing function that does no smoothing

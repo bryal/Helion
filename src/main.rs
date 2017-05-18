@@ -30,19 +30,22 @@ extern crate clock_ticks;
 extern crate serial;
 extern crate captrs;
 
-use config::parse_led_indices;
-use color::{Rgb8, RgbTransformer, Color};
-use capture::ImageAnalyzer;
+#[cfg(feature = "cpuprofiler")]
+extern crate cpuprofiler;
+
 use captrs::Capturer;
+use capture::ImageAnalyzer;
+use color::{Rgb8, RgbTransformer, HSVTransformer, Color};
+use config::parse_led_indices;
 use serial::SerialPort;
-use std::iter::repeat;
-use std::sync::mpsc::{Sender, Receiver, channel};
 use std::{thread, time};
 use std::cmp::{max, Ordering};
 
 mod config;
 mod color;
 mod capture;
+
+type SmoothFn = fn(Rgb8, Rgb8, f64) -> Rgb8;
 
 /// Returns smallest of `a` and `b` if there is one, else returns `expect`
 fn partial_min<T: PartialOrd>(a: T, b: T, expect: T) -> T {
@@ -65,19 +68,18 @@ fn partial_max<T: PartialOrd>(a: T, b: T, expect: T) -> T {
 
 /// A special header is expected by the corresponding LED streaming code running on the Arduino.
 /// This only needs to be initialized once since the number of LEDs remains constant.
-fn new_pixel_buf_header(n_leds: u16) -> Vec<u8> {
+fn new_pixel_buf_header(n_leds: u16) -> [u8; 6] {
     // In the two below, not sure why the -1 in `(n_leds - 1)` is needed,
     // but that's how LEDstream on the Arduino expects it
-    let count_high = ((n_leds - 1) >> 8) as u8;  // LED count high byte
+    let count_high = ((n_leds - 1) >> 8) as u8; // LED count high byte
     let count_low = ((n_leds - 1) & 0xff) as u8; // LED count low byte
-    vec![
-		'A' as u8,
-		'd' as u8,
-		'a' as u8,
-		count_high,
-		count_low,
-		count_high ^ count_low ^ 0x55, // Checksum
-	]
+
+    ['A' as u8,
+     'd' as u8,
+     'a' as u8,
+     count_high,
+     count_low,
+     count_high ^ count_low ^ 0x55 /* Checksum */]
 }
 
 /// A timer to track time passed between refreshes. Can for example be used to limit frame rate.
@@ -118,46 +120,101 @@ impl FrameTimer {
     }
 }
 
-/// Initialize a thread for serial writing given a serial port, baud rate, header to write before
-/// each data write, and buffer with the actual led color data.
-fn init_write_thread(port: &str,
-                     baud_rate: u32,
-                     header: Vec<u8>,
-                     pixel_buf: Vec<Rgb8>)
-                     -> (Sender<Vec<Rgb8>>, Receiver<Vec<Rgb8>>) {
-    use std::io::Write;
+/// Writes color data via serial to LEDstream compatible device
+struct ColorWriter {
+    con: serial::SystemPort,
+    header: [u8; 6],
+}
 
-    let mut serial_con = serial::open(port).unwrap();
+impl ColorWriter {
+    /// Configure serial writing given a serial port, baud rate, and header to write before
+    /// each data write
+    fn new(port: &str, baud_rate: u32, header: [u8; 6]) -> Self {
+        let mut serial_con = serial::open(port).unwrap();
 
-    let baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
+        let baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
 
-    serial_con.reconfigure(&|cfg| cfg.set_baud_rate(baud_rate)).unwrap();
+        serial_con.reconfigure(&|cfg| cfg.set_baud_rate(baud_rate)).unwrap();
 
-    let (from_write_thread_tx, from_write_thread_rx) = channel();
-    let (to_write_thread_tx, to_write_thread_rx) = channel::<Vec<Rgb8>>();
+        ColorWriter { con: serial_con, header: header }
+    }
 
-    thread::spawn(move || {
-        loop {
-            let pixel_buf = color::rgbs_to_bytes(to_write_thread_rx.recv().unwrap());
+    /// Write a buffer of color data to the LEDstream device
+    fn write_colors(&mut self, color_data: &[Rgb8]) {
+        use std::io::Write;
 
-            match serial_con.write(&header) {
-                Ok(hn) if hn == header.len() => {
-                    match serial_con.write(&pixel_buf) {
-                        Ok(bn) if bn == pixel_buf.len() => (),
-                        Ok(_) => println!("Failed to write all bytes of RGB data"),
-                        Err(e) => println!("Failed to write RGB data, {}", e),
+        let color_bytes = color::rgbs_as_bytes(color_data);
+
+        match self.con.write(&self.header) {
+            Ok(hn) if hn == self.header.len() => {
+                match self.con.write(color_bytes) {
+                    Ok(bn) if bn == color_bytes.len() => (),
+                    Ok(bn) => {
+                        println!("Failed to write all bytes of RGB data. Wrote {} of {}",
+                                 bn,
+                                 color_data.len())
                     }
+                    Err(e) => println!("Failed to write RGB data, {}", e),
                 }
-                Ok(_) => println!("Failed to write all bytes in header"),
-                Err(e) => println!("Failed to write header, {}", e),
             }
-
-            from_write_thread_tx.send(color::bytes_to_rgbs(pixel_buf)).unwrap();
+            Ok(_) => println!("Failed to write all bytes in header"),
+            Err(e) => println!("Failed to write header, {}", e),
         }
-    });
-    to_write_thread_tx.send(pixel_buf).unwrap();
+    }
+}
 
-    (to_write_thread_tx, from_write_thread_rx)
+/// Update the colors to output by analyzing the captured frame for each led
+fn update_out_color_data(out_pixels: &mut [Rgb8],
+                         frame_analyzer: &ImageAnalyzer,
+                         leds: &[config::Region],
+                         leds_transformers: &[Vec<(Option<RgbTransformer>,
+                                                   Option<&HSVTransformer>)>],
+                         smooth: SmoothFn,
+                         smooth_factor: f64) {
+    for (i, &led) in leds.iter().enumerate() {
+        let avg_color = frame_analyzer.average_color(led);
+
+        let to_pixel = leds_transformers[i]
+            .iter()
+            .map(|&(ref opt_rgb, ref opt_hsv)| (opt_rgb.as_ref(), opt_hsv.as_ref()))
+            .fold(Color::RGB(avg_color),
+                  |acc_color, transformers| match transformers {
+                      (Some(rgb_tr), Some(hsv_tr)) => {
+                          Color::HSV(hsv_tr.transform(rgb_tr.transform(acc_color.into_rgb())
+                                                            .to_hsv()))
+                      }
+                      (Some(rgb_tr), _) => Color::RGB(rgb_tr.transform(acc_color.into_rgb())),
+                      (_, Some(hsv_tr)) => Color::HSV(hsv_tr.transform(acc_color.into_hsv())),
+                      _ => acc_color,
+                  })
+            .into_rgb();
+
+        out_pixels[i] = smooth(out_pixels[i], to_pixel, smooth_factor);
+    }
+}
+
+/// Specifies how to loop over the main body
+#[cfg(not(feature = "cpuprofiler"))]
+fn main_loop<F: FnMut() -> bool>(mut body: F) {
+    loop {
+        if !body() {
+            break;
+        }
+    }
+}
+
+/// Loop over the main body a fixed number of times and track performance with a profiler
+#[cfg(feature = "cpuprofiler")]
+fn main_loop<F: FnMut() -> bool>(mut body: F) {
+    cpuprofiler::PROFILER.lock().unwrap().start("./prof.profile").unwrap();
+
+    for _ in 0..1000 {
+        if !body() {
+            break;
+        }
+    }
+
+    cpuprofiler::PROFILER.lock().unwrap().stop().unwrap();
 }
 
 fn main() {
@@ -165,17 +222,12 @@ fn main() {
 
     let leds: &[_] = &config.leds;
 
-    let mut led_transformers_list: Vec<_> = repeat(Vec::with_capacity(2))
-        .take(leds.len())
-        .collect();
+    let mut led_transformers_list: Vec<_> = vec![Vec::with_capacity(1); leds.len()];
 
     // Add color transforms from config to each led in matching vec
     for transform_conf in config.color.transform.iter() {
-        let hsv_transformer = if !transform_conf.hsv.is_default() {
-            Some(&transform_conf.hsv)
-        } else {
-            None
-        };
+        let hsv_transformer =
+            if !transform_conf.hsv.is_default() { Some(&transform_conf.hsv) } else { None };
 
         let rgb_transformer = if !(transform_conf.red.is_default() &&
                                    transform_conf.green.is_default() &&
@@ -196,29 +248,19 @@ fn main() {
         }
     }
 
-    // Do serial writing on own thread as to not block.
-    let (write_thread_tx, write_thread_rx) = {
-        // Header to write before led data
-        let out_header = new_pixel_buf_header(leds.len() as u16);
+    // Header to write before led data
+    let out_header = new_pixel_buf_header(leds.len() as u16);
 
-        // Skeleton for the output led pixel buffer to write to arduino
-        let out_pixels = repeat(Rgb8 { r: 0, g: 0, b: 0 }).take(leds.len()).collect();
+    let mut color_writer = ColorWriter::new(&config.device.output, config.device.rate, out_header);
 
-        init_write_thread(&config.device.output,
-                          config.device.rate,
-                          out_header,
-                          out_pixels)
-    };
+    // Skeleton for the output led pixel buffer to write to arduino
+    let mut out_pixels = vec![Rgb8 { r: 0, g: 0, b: 0 }; leds.len()];
 
     let mut capturer = Capturer::new(0).unwrap();
 
     let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
 
-    let mut frame_analyzer = ImageAnalyzer::new();
-    frame_analyzer.set_resize_dimensions((config.framegrabber.width, config.framegrabber.height));
-
     // Function to use when smoothing led colors
-    type SmoothFn = fn(Rgb8, Rgb8, f64) -> Rgb8;
     let smooth = match config.color.smoothing.type_.as_ref() {
         "linear" => color::linear_smooth as SmoothFn,
         _ => color::no_smooth as SmoothFn,
@@ -240,63 +282,52 @@ fn main() {
 
     let mut capture_timer = FrameTimer::new();
     let mut led_refresh_timer = FrameTimer::new();
-    loop {
+
+    main_loop(|| {
         led_refresh_timer.tick();
 
         // Don't capture new frame if going faster than frame limit,
         // but still proceed to smooth leds
         if capture_timer.dt_to_now() > capture_frame_interval {
             // If something goes wrong, last frame is reused
-            match capturer.capture_frame() {
-                Ok(frame) => {
-                    let (w, h) = capturer.geometry();
-                    frame_analyzer.data = frame;
-                    frame_analyzer.width = w as usize;
-                    frame_analyzer.height = h as usize;
-                }
-                Err(e) => {
-                    println!("Error: {:?}", e);
-                    thread::sleep(time::Duration::from_millis(1_000));
-                    capturer = Capturer::new(0).unwrap();
-                }
+
+            if let Err(e) = capturer.capture_store_frame() {
+                println!("Error: {:?}", e);
+                thread::sleep(time::Duration::from_millis(1_000));
+                capturer = Capturer::new(0).unwrap();
+                return true;
             }
+
             capture_timer.tick();
         }
 
-        let mut out_pixels = write_thread_rx.recv().unwrap();
+        if let Some(frame) = capturer.get_stored_frame() {
+            let (w, h) = capturer.geometry();
+            let frame_analyzer = ImageAnalyzer::new(frame,
+                                                    w as usize,
+                                                    h as usize,
+                                                    config.framegrabber.width,
+                                                    config.framegrabber.height);
 
-        let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
 
-        for (i, &led) in leds.iter().enumerate() {
-            let avg_color = frame_analyzer.average_color(led);
+            let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
 
-            let to_pixel = led_transformers_list[i]
-                .iter()
-                .map(|&(ref opt_rgb, ref opt_hsv)| (opt_rgb.as_ref(), opt_hsv.as_ref()))
-                .fold(Color::RGB(avg_color),
-                      |acc_color, transformers| match transformers {
-                          (Some(rgb_tr), Some(hsv_tr)) => Color::HSV(
-							hsv_tr.transform(rgb_tr.transform(acc_color.into_rgb()).to_hsv())),
-                          (Some(rgb_tr), _) => Color::RGB(rgb_tr.transform(acc_color.into_rgb())),
-                          (_, Some(hsv_tr)) => Color::HSV(hsv_tr.transform(acc_color.into_hsv())),
-                          _ => acc_color,
-                      })
-                .into_rgb();
+            update_out_color_data(&mut out_pixels,
+                                  &frame_analyzer,
+                                  leds,
+                                  &led_transformers_list,
+                                  smooth,
+                                  smooth_factor);
 
-            out_pixels[i] = smooth(out_pixels[i], to_pixel, smooth_factor);
+            color_writer.write_colors(&out_pixels)
         }
-
-        write_thread_tx.send(out_pixels).unwrap();
 
         let time_left = led_refresh_interval - led_refresh_timer.dt_to_now();
         if time_left > 0.0 {
-            let ms = if time_left > 0.0 {
-                time_left * 1_000.0
-            } else {
-                0.0
-            };
+            let ms = if time_left > 0.0 { time_left * 1_000.0 } else { 0.0 };
 
             thread::sleep(time::Duration::from_millis(ms as u64));
         }
-    }
+        true
+    })
 }
