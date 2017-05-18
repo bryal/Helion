@@ -160,21 +160,21 @@ pub fn rgbs_as_bytes(v: &[Rgb8]) -> &[u8] {
 }
 
 /// LED color smoothing function that does no smoothing
-pub fn no_smooth(_: Rgb8, to: Rgb8, _: f64) -> Rgb8 {
+pub fn no_smooth(_: Rgb8, to: Rgb8, _: f32) -> Rgb8 {
     to
 }
 
 /// Linear smooth of LED colors with regards to time
-pub fn linear_smooth(from: Rgb8, to: Rgb8, factor: f64) -> Rgb8 {
+pub fn linear_smooth(from: Rgb8, to: Rgb8, factor: f32) -> Rgb8 {
     if factor > 1.0 {
         to
     } else {
         let (r_diff, g_diff, b_diff) =
-            (to.r as f64 - from.r as f64, to.g as f64 - from.g as f64, to.b as f64 - from.b as f64);
+            (to.r as f32 - from.r as f32, to.g as f32 - from.g as f32, to.b as f32 - from.b as f32);
         Rgb8 {
-            r: (from.r as f64 + (r_diff * factor)) as u8,
-            g: (from.g as f64 + (g_diff * factor)) as u8,
-            b: (from.b as f64 + (b_diff * factor)) as u8,
+            r: (from.r as f32 + (r_diff * factor)) as u8,
+            g: (from.g as f32 + (g_diff * factor)) as u8,
+            b: (from.b as f32 + (b_diff * factor)) as u8,
         }
     }
 }

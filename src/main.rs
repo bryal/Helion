@@ -45,7 +45,7 @@ mod config;
 mod color;
 mod capture;
 
-type SmoothFn = fn(Rgb8, Rgb8, f64) -> Rgb8;
+type SmoothFn = fn(Rgb8, Rgb8, f32) -> Rgb8;
 
 /// Returns smallest of `a` and `b` if there is one, else returns `expect`
 fn partial_min<T: PartialOrd>(a: T, b: T, expect: T) -> T {
@@ -170,7 +170,7 @@ fn update_out_color_data(out_pixels: &mut [Rgb8],
                          leds_transformers: &[Vec<(Option<RgbTransformer>,
                                                    Option<&HSVTransformer>)>],
                          smooth: SmoothFn,
-                         smooth_factor: f64) {
+                         smooth_factor: f32) {
     for (i, &led) in leds.iter().enumerate() {
         let avg_color = frame_analyzer.average_color(led);
 
@@ -310,7 +310,7 @@ fn main() {
                                                     config.framegrabber.height);
 
 
-            let smooth_factor = led_refresh_timer.last_frame_dt() / smooth_time_const;
+            let smooth_factor = (led_refresh_timer.last_frame_dt() / smooth_time_const) as f32;
 
             update_out_color_data(&mut out_pixels,
                                   &frame_analyzer,

@@ -23,16 +23,9 @@ impl<'i> ImageAnalyzer<'i> {
                resize_width: usize,
                resize_height: usize)
                -> Self {
-        let resize_width = if resize_width == 0 {
-            width
-        } else {
-            resize_width
-        };
-        let resize_height = if resize_height == 0 {
-            height
-        } else {
-            resize_height
-        };
+        let resize_width = if resize_width == 0 { width } else { resize_width };
+        let resize_height = if resize_height == 0 { height } else { resize_height };
+
         Self {
             data: data,
             width: width,
