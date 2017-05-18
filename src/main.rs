@@ -29,6 +29,7 @@ extern crate rustc_serialize as rustc_serialize;
 extern crate clock_ticks;
 extern crate serial;
 extern crate captrs;
+extern crate simd;
 
 #[cfg(feature = "cpuprofiler")]
 extern crate cpuprofiler;

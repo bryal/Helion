@@ -1,7 +1,7 @@
 
 [package]
 name = "helion"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
 
@@ -13,6 +13,7 @@ rustc-serialize = "0.3"
 captrs = "0.2"
 clock_ticks = "0.0.6"
 serial = "0.3"
+simd = "0.2"
 
 # Optional dependencies
 cpuprofiler = { version = "0.0.3", optional = true }

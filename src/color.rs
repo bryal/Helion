@@ -1,5 +1,6 @@
 use config::{self, AdditiveColorConf};
 use partial_min;
+use simd::f32x4;
 use std::cmp::{max, min};
 use std::slice;
 
@@ -169,12 +170,17 @@ pub fn linear_smooth(from: Rgb8, to: Rgb8, factor: f32) -> Rgb8 {
     if factor > 1.0 {
         to
     } else {
-        let (r_diff, g_diff, b_diff) =
-            (to.r as f32 - from.r as f32, to.g as f32 - from.g as f32, to.b as f32 - from.b as f32);
+        let from_f = f32x4::new(from.r as f32, from.g as f32, from.b as f32, 0.0);
+        let to_f = f32x4::new(to.r as f32, to.g as f32, to.b as f32, 0.0);
+
+        let diff = to_f - from_f;
+
+        let res = from_f + diff * f32x4::splat(factor);
+
         Rgb8 {
-            r: (from.r as f32 + (r_diff * factor)) as u8,
-            g: (from.g as f32 + (g_diff * factor)) as u8,
-            b: (from.b as f32 + (b_diff * factor)) as u8,
+            r: res.extract(0) as u8,
+            g: res.extract(1) as u8,
+            b: res.extract(2) as u8,
         }
     }
 }
