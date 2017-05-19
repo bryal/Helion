@@ -25,7 +25,10 @@
 // TODO: Support capturing a virtual desktop, multiple monotors together
 // TODO: Optional solid color or animation when there's no signal
 
-extern crate rustc_serialize as rustc_serialize;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 extern crate clock_ticks;
 extern crate serial;
 extern crate captrs;
