@@ -138,7 +138,8 @@ impl ColorWriter {
 
         let baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
 
-        serial_con.reconfigure(&|cfg| cfg.set_baud_rate(baud_rate)).unwrap();
+        serial_con.reconfigure(&|cfg| cfg.set_baud_rate(baud_rate))
+                  .unwrap();
 
         ColorWriter { con: serial_con, header: header }
     }
@@ -181,16 +182,17 @@ fn update_out_color_data(out_pixels: &mut [Rgb8],
         let to_pixel = leds_transformers[i]
             .iter()
             .map(|&(ref opt_rgb, ref opt_hsv)| (opt_rgb.as_ref(), opt_hsv.as_ref()))
-            .fold(Color::RGB(avg_color),
-                  |acc_color, transformers| match transformers {
-                      (Some(rgb_tr), Some(hsv_tr)) => {
-                          Color::HSV(hsv_tr.transform(rgb_tr.transform(acc_color.into_rgb())
-                                                            .to_hsv()))
-                      }
-                      (Some(rgb_tr), _) => Color::RGB(rgb_tr.transform(acc_color.into_rgb())),
-                      (_, Some(hsv_tr)) => Color::HSV(hsv_tr.transform(acc_color.into_hsv())),
-                      _ => acc_color,
-                  })
+            .fold(Color::RGB(avg_color), |acc_color, transformers| {
+                match transformers {
+                    (Some(rgb_tr), Some(hsv_tr)) => {
+                        Color::HSV(hsv_tr.transform(rgb_tr.transform(acc_color.into_rgb())
+                                                          .to_hsv()))
+                    }
+                    (Some(rgb_tr), _) => Color::RGB(rgb_tr.transform(acc_color.into_rgb())),
+                    (_, Some(hsv_tr)) => Color::HSV(hsv_tr.transform(acc_color.into_hsv())),
+                    _ => acc_color,
+                }
+            })
             .into_rgb();
 
         out_pixels[i] = smooth(out_pixels[i], to_pixel, smooth_factor);
@@ -210,7 +212,10 @@ fn main_loop<F: FnMut() -> bool>(mut body: F) {
 /// Loop over the main body a fixed number of times and track performance with a profiler
 #[cfg(feature = "cpuprofiler")]
 fn main_loop<F: FnMut() -> bool>(mut body: F) {
-    cpuprofiler::PROFILER.lock().unwrap().start("./prof.profile").unwrap();
+    cpuprofiler::PROFILER.lock()
+                         .unwrap()
+                         .start("./prof.profile")
+                         .unwrap();
 
     for _ in 0..1000 {
         if !body() {
@@ -237,10 +242,10 @@ fn main() {
                                    transform_conf.green.is_default() &&
                                    transform_conf.red.is_default()) {
             Some(RgbTransformer {
-                r: transform_conf.red.clone(),
-                g: transform_conf.green.clone(),
-                b: transform_conf.blue.clone(),
-            })
+                     r: transform_conf.red.clone(),
+                     g: transform_conf.green.clone(),
+                     b: transform_conf.blue.clone(),
+                 })
         } else {
             None
         };
