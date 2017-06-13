@@ -32,6 +32,8 @@ use std::path;
 pub struct DeviceConfig {
     /// The baudrate of the output to the device
     pub rate: u32,
+    /// The monitor output index to capture
+    pub input: u32,
     /// The address of the serial output.
     ///
     /// On Windows, this is something like `COM42`. On Linux, `/dev/ttys42`

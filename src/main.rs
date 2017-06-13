@@ -37,7 +37,7 @@ extern crate simd;
 #[cfg(feature = "cpuprofiler")]
 extern crate cpuprofiler;
 
-use captrs::Capturer;
+use captrs::{Capturer, CaptureError};
 use capture::ImageAnalyzer;
 use color::{Rgb8, RgbTransformer, HSVTransformer, Color};
 use config::parse_led_indices;
@@ -260,7 +260,7 @@ fn main() {
     // Skeleton for the output led pixel buffer to write to arduino
     let mut out_pixels = vec![Rgb8 { r: 0, g: 0, b: 0 }; leds.len()];
 
-    let mut capturer = Capturer::new(0).unwrap();
+    let mut capturer = Capturer::new(config.device.input as usize).unwrap();
 
     let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
 
@@ -276,12 +276,13 @@ fn main() {
     let led_refresh_interval = 1.0 / config.color.smoothing.update_frequency;
 
     println!("Helion - An LED streamer\nNumber of LEDs: {}\nResize resolution: {} x {}\nCapture \
-              rate: {} fps\nLED refresh rate: {} hz\nSerial port: {}",
+              rate: {} fps\nLED refresh rate: {} hz\nCapture output: {}\nSerial port: {}",
              leds.len(),
              config.framegrabber.width,
              config.framegrabber.height,
              config.framegrabber.frequency_Hz,
              1.0 / led_refresh_interval,
+             config.device.input,
              config.device.output);
 
     let mut capture_timer = FrameTimer::new();
@@ -295,11 +296,30 @@ fn main() {
         if capture_timer.dt_to_now() > capture_frame_interval {
             // If something goes wrong, last frame is reused
 
-            if let Err(e) = capturer.capture_store_frame() {
-                println!("Error: {:?}", e);
-                thread::sleep(time::Duration::from_millis(1_000));
-                capturer = Capturer::new(0).unwrap();
-                return true;
+            match capturer.capture_store_frame() {
+                Ok(_) => (),
+                Err(CaptureError::Timeout) => {
+                    println!("timeout");
+                    thread::sleep(time::Duration::from_millis(100));
+                    return true;
+                }
+                Err(e) => {
+                    println!("Capture error: {:?}", e);
+                    thread::sleep(time::Duration::from_millis(2_000));
+
+                    loop {
+                        match Capturer::new(config.device.input as usize) {
+                            Ok(c) => {
+                                capturer = c;
+                                break;
+                            }
+                            Err(e1) => {
+                                println!("Error creating capturer: {:?}", e1);
+                                thread::sleep(time::Duration::from_millis(1_000));
+                            }
+                        }
+                    }
+                }
             }
 
             capture_timer.tick();
