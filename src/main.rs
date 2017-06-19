@@ -126,6 +126,8 @@ impl FrameTimer {
 
 /// Writes color data via serial to LEDstream compatible device
 struct ColorWriter {
+    port: String,
+    baud_rate: serial::BaudRate,
     con: serial::SystemPort,
     header: [u8; 6],
 }
@@ -134,14 +136,28 @@ impl ColorWriter {
     /// Configure serial writing given a serial port, baud rate, and header to write before
     /// each data write
     fn new(port: &str, baud_rate: u32, header: [u8; 6]) -> Self {
-        let mut serial_con = serial::open(port).unwrap();
+        let serial_baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
 
-        let baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
+        let serial_con = ColorWriter::connect(port, serial_baud_rate).unwrap();
 
-        serial_con.reconfigure(&|cfg| cfg.set_baud_rate(baud_rate))
-                  .unwrap();
+        ColorWriter {
+            port: port.to_string(),
+            baud_rate: serial_baud_rate,
+            con: serial_con,
+            header: header,
+        }
+    }
 
-        ColorWriter { con: serial_con, header: header }
+    fn connect(port: &str,
+               baud_rate: serial::BaudRate)
+               -> Result<serial::SystemPort, serial::Error> {
+        serial::open(port).and_then(|mut con| {
+            con.reconfigure(&|settings| {
+                settings.set_char_size(serial::CharSize::Bits8);
+                settings.set_baud_rate(baud_rate)
+            })
+                .map(|()| con)
+        })
     }
 
     /// Write a buffer of color data to the LEDstream device
@@ -163,7 +179,25 @@ impl ColorWriter {
                 }
             }
             Ok(_) => println!("Failed to write all bytes in header"),
-            Err(e) => println!("Failed to write header, {}", e),
+            Err(e) => {
+                println!("Failed to write header, {}", e);
+                // Probably, the serial device was temporarily disconnected or rebooted.
+                // Try to reconnect forever
+                loop {
+                    print!("Reopening serial port... ");
+                    match ColorWriter::connect(&self.port, self.baud_rate) {
+                        Ok(con) => {
+                            self.con = con;
+                            println!("success!");
+                            break;
+                        }
+                        Err(e) => {
+                            println!("{}", e);
+                            thread::sleep(time::Duration::from_millis(1000));
+                        }
+                    }
+                }
+            }
         }
     }
 }
