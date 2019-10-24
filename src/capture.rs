@@ -1,6 +1,6 @@
+use crate::color::Rgb8;
+use crate::config::Region;
 use captrs::Bgr8;
-use color::Rgb8;
-use config::Region;
 
 /// An analyzer with a slot for an image to be analyzed.
 ///

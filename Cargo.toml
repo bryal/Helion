@@ -4,6 +4,7 @@ name = "helion"
 version = "0.3.2"
 authors = ["bryal <96.bryal@gmail.com>"]
 build = "build.rs"
+edition = "2018"
 
 [features]
 profiling = ["cpuprofiler"]

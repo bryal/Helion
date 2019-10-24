@@ -1,6 +1,6 @@
-use config::{self, AdditiveColorConf};
-use partial_min;
 use simd::f32x4;
+use crate::config::{self, AdditiveColorConf};
+use crate::partial_min;
 use std::cmp::{max, min};
 use std::slice;
 
