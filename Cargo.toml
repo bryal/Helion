@@ -2,6 +2,10 @@
 name = "helion"
 version = "0.5.0"
 authors = ["jojo <jo@jo.zone>"]
+description = "Ambilight clone. Stream color data of captured screen to Adalight device."
+repository = "https://github.com/bryal/Helion"
+readme = "README.md"
+keywords = ["ambilight", "adalight", "hyperion", "arduino", "light"]
 license = "AGPL-3.0"
 build = "build.rs"
 edition = "2018"
