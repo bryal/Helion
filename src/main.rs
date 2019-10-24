@@ -288,7 +288,7 @@ fn main() {
     let mut color_writer = ColorWriter::new(&config.device.output, config.device.rate, out_header);
     // Skeleton for the output led pixel buffer to write to arduino
     let mut out_pixels = vec![Rgb8 { r: 0, g: 0, b: 0 }; leds.len()];
-    let mut capturer = Capturer::new(config.device.input as usize).unwrap();
+    let mut capturer = Some(Capturer::new(config.device.input as usize).unwrap());
     let capture_frame_interval = 1.0 / config.framegrabber.frequency_Hz;
     // Function to use when smoothing led colors
     let smooth = match config.color.smoothing.type_.as_ref() {
@@ -309,19 +309,15 @@ fn main() {
         config.device.input,
         config.device.output
     );
-
     let mut capture_timer = FrameTimer::new();
     let mut led_refresh_timer = FrameTimer::new();
-
     main_loop(|| {
         led_refresh_timer.tick();
-
         // Don't capture new frame if going faster than frame limit,
         // but still proceed to smooth leds
         if capture_timer.dt_to_now() > capture_frame_interval {
             // If something goes wrong, last frame is reused
-
-            match capturer.capture_store_frame() {
+            match capturer.as_mut().unwrap().capture_store_frame() {
                 Ok(_) => (),
                 Err(CaptureError::Timeout) => {
                     println!("timeout");
@@ -330,11 +326,12 @@ fn main() {
                 }
                 Err(e) => {
                     println!("Capture error: {:?}", e);
+                    drop(capturer.take());
                     thread::sleep(time::Duration::from_millis(2_000));
                     loop {
                         match Capturer::new(config.device.input as usize) {
                             Ok(c) => {
-                                capturer = c;
+                                capturer = Some(c);
                                 break;
                             }
                             Err(e1) => {
@@ -347,16 +344,15 @@ fn main() {
             }
             capture_timer.tick();
         }
-
-        if let Some(frame) = capturer.get_stored_frame() {
-            let (w, h) = capturer.geometry();
-            let frame_analyzer = ImageAnalyzer::new(frame,
-                                                    w as usize,
-                                                    h as usize,
-                                                    config.framegrabber.width,
-                                                    config.framegrabber.height);
-
-
+        if let Some(frame) = capturer.as_ref().unwrap().get_stored_frame() {
+            let (w, h) = capturer.as_ref().unwrap().geometry();
+            let frame_analyzer = ImageAnalyzer::new(
+                frame,
+                w as usize,
+                h as usize,
+                config.framegrabber.width,
+                config.framegrabber.height,
+            );
             let smooth_factor = (led_refresh_timer.last_frame_dt() / smooth_time_const) as f32;
             update_out_color_data(
                 &mut out_pixels,
