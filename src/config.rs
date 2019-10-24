@@ -48,6 +48,7 @@ pub struct HSV {
     /// The gain adjustement of the value
     pub valueGain: f32,
 }
+
 impl HSV {
     /// Test if config values are same as default values
     pub fn is_default(&self) -> bool {
@@ -67,11 +68,14 @@ pub struct AdditiveColorConf {
     /// The highest possible value (when the channel is white)
     pub whitelevel: f32,
 }
+
 impl AdditiveColorConf {
     /// Test if config values are same as default values
     pub fn is_default(&self) -> bool {
-        self.threshold == 0.0 && self.gamma == 1.0 && self.blacklevel == 0.0 &&
-        self.whitelevel == 1.0
+        self.threshold == 0.0
+            && self.gamma == 1.0
+            && self.blacklevel == 0.0
+            && self.whitelevel == 1.0
     }
 }
 
@@ -160,35 +164,33 @@ pub struct LedsConfig {
 /// Parse the HyperCon JSON config to useable struct
 pub fn parse_config() -> LedsConfig {
     use std::io::Read;
-
     let mut json_str = String::with_capacity(10_000);
     match File::open(&path::Path::new("hyperion.config.json")) {
-        Ok(mut file) => {
-            match file.read_to_string(&mut json_str) {
-                Ok(_) => (),
-                Err(e) => {
-                    println!("Error\nConfig could not be read\n");
-                    panic!("{}", e)
-                }
+        Ok(mut file) => match file.read_to_string(&mut json_str) {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Error\nConfig could not be read\n");
+                panic!("{}", e)
             }
-        }
+        },
         Err(e) => {
             println!("Error\nConfig file `hyperion.config.json` could not be opened\n");
             panic!("{}", e)
         }
     }
-
-    let no_comments = json_str.lines()
-                              .map(|l| l.trim())
-                              .filter(|l| !l.is_empty() && !l.starts_with("//"))
-                              .collect::<String>();
-
+    let no_comments = json_str
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("//"))
+        .collect::<String>();
     match serde_json::from_str(&no_comments) {
         Ok(o) => o,
         Err(e) => {
-            println!("Error\nConfig could not be parsed\nThere might be a missing field, make \
-                      sure that the config contains all required \
-                      settings.\nhttps://github.com/bryal/Helion");
+            println!(
+                "Error\nConfig could not be parsed\nThere might be a missing field, make \
+                 sure that the config contains all required \
+                 settings.\nhttps://github.com/bryal/Helion"
+            );
             panic!("{}", e)
         }
     }
@@ -204,35 +206,40 @@ pub fn parse_led_indices(indices_str: &str, total_n_leds: usize) -> Vec<Range<us
     if indices_str == "*" {
         vec![0..total_n_leds]
     } else {
-        indices_str.split(',')
-                   .map(|index_str| index_str.trim().split('-').collect::<Vec<_>>())
-                   .filter(|is| is.len() <= 2 && is.len() >= 1)
-                   .filter_map(|index_strs| match index_strs.len() {
-                       1 => {
-                           if let Ok(i) = index_strs[0].parse::<usize>() {
-                               Some(i..(i + 1))
-                           } else {
-                               None
-                           }
-                       }
-                       2 => {
-                           if let (Ok(i), Ok(j)) = (index_strs[0].parse::<usize>(),
-                                                    index_strs[1].parse::<usize>()) {
-                               Some(i..(j + 1))
-                           } else {
-                               None
-                           }
-                       }
-                       _ => None,
-                   })
-                   .collect()
+        indices_str
+            .split(',')
+            .map(|index_str| index_str.trim().split('-').collect::<Vec<_>>())
+            .filter(|is| is.len() <= 2 && is.len() >= 1)
+            .filter_map(|index_strs| match index_strs.len() {
+                1 => {
+                    if let Ok(i) = index_strs[0].parse::<usize>() {
+                        Some(i..(i + 1))
+                    } else {
+                        None
+                    }
+                }
+                2 => {
+                    if let (Ok(i), Ok(j)) = (
+                        index_strs[0].parse::<usize>(),
+                        index_strs[1].parse::<usize>(),
+                    ) {
+                        Some(i..(j + 1))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
 
 #[test]
 fn parse_led_indices_test() {
-    assert_eq!(parse_led_indices("3, 4-8, 0, 20-24", 10),
-               vec![3..4, 4..9, 0..1, 20..25]);
+    assert_eq!(
+        parse_led_indices("3, 4-8, 0, 20-24", 10),
+        vec![3..4, 4..9, 0..1, 20..25]
+    );
     assert_eq!(parse_led_indices("*", 10), vec![0..10]);
     assert_eq!(parse_led_indices("0, 1 - 5", 10), vec![0..1]);
     assert_eq!(parse_led_indices("1-A", 10), vec![]);

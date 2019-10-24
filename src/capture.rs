@@ -15,17 +15,26 @@ pub struct ImageAnalyzer<'i> {
     resize_width: usize,
     resize_height: usize,
 }
+
 impl<'i> ImageAnalyzer<'i> {
     /// Construct a new `ImageAnalyzer` with an empty image slotted and resize dimensions of 1
-    pub fn new(data: &'i [Bgr8],
-               width: usize,
-               height: usize,
-               resize_width: usize,
-               resize_height: usize)
-               -> Self {
-        let resize_width = if resize_width == 0 { width } else { resize_width };
-        let resize_height = if resize_height == 0 { height } else { resize_height };
-
+    pub fn new(
+        data: &'i [Bgr8],
+        width: usize,
+        height: usize,
+        resize_width: usize,
+        resize_height: usize,
+    ) -> Self {
+        let resize_width = if resize_width == 0 {
+            width
+        } else {
+            resize_width
+        };
+        let resize_height = if resize_height == 0 {
+            height
+        } else {
+            resize_height
+        };
         Self {
             data: data,
             width: width,
@@ -40,19 +49,21 @@ impl<'i> ImageAnalyzer<'i> {
         if self.data.len() == 0 {
             Rgb8 { r: 0, g: 0, b: 0 }
         } else {
-            let (resize_width_ratio, resize_height_ratio) =
-                (self.width as f32 / self.resize_width as f32,
-                 self.height as f32 / self.resize_height as f32);
-            let (y1, y2, x1, x2) = ((led.vscan.minimum * self.resize_height as f32) as usize,
-                                    (led.vscan.maximum * self.resize_height as f32) as usize,
-                                    (led.hscan.minimum * self.resize_width as f32) as usize,
-                                    (led.hscan.maximum * self.resize_width as f32) as usize);
+            let (resize_width_ratio, resize_height_ratio) = (
+                self.width as f32 / self.resize_width as f32,
+                self.height as f32 / self.resize_height as f32,
+            );
+            let (y1, y2, x1, x2) = (
+                (led.vscan.minimum * self.resize_height as f32) as usize,
+                (led.vscan.maximum * self.resize_height as f32) as usize,
+                (led.hscan.minimum * self.resize_width as f32) as usize,
+                (led.hscan.maximum * self.resize_width as f32) as usize,
+            );
             let (mut r_sum, mut g_sum, mut b_sum) = (0u64, 0u64, 0u64);
-
             for row in y1..y2 {
                 for col in x1..x2 {
-                    let i = row as f32 * resize_height_ratio * self.width as f32 +
-                            col as f32 * resize_width_ratio;
+                    let i = row as f32 * resize_height_ratio * self.width as f32
+                        + col as f32 * resize_width_ratio;
 
                     let pixel = &self.data[i as usize];
 
@@ -61,7 +72,6 @@ impl<'i> ImageAnalyzer<'i> {
                     b_sum += pixel.b as u64;
                 }
             }
-
             let n_of_pixels = ((x2 - x1) * (y2 - y1)) as u64;
             Rgb8 {
                 r: (r_sum / n_of_pixels) as u8,

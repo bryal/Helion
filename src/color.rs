@@ -8,7 +8,11 @@ static RGB_SIZE: usize = 3; // Rgb8 => 3 bytes, what LEDstream expects
 
 /// Just a simple modulo function, since % in rust is remainder
 fn modulo(l: f32, r: f32) -> f32 {
-    if l >= 0.0 { l % r } else { r + l % r }
+    if l >= 0.0 {
+        l % r
+    } else {
+        r + l % r
+    }
 }
 
 /// Describes how to transform the red, green, and blue in an RGB pixel
@@ -18,15 +22,17 @@ pub struct RgbTransformer {
     pub g: AdditiveColorConf,
     pub b: AdditiveColorConf,
 }
+
 impl RgbTransformer {
     /// Transform a color with RGB modifiers.
     pub fn transform(&self, rgb: Rgb8) -> Rgb8 {
         let (mut channels, transformers) = ([rgb.r, rgb.g, rgb.b], [&self.r, &self.g, &self.b]);
 
         for (channel, transformer) in channels.iter_mut().zip(transformers.iter()) {
-            let c = (*channel as f32 / 255.0).powf(transformer.gamma) * transformer.whitelevel *
-                    (1.0 - transformer.blacklevel) +
-                    transformer.blacklevel;
+            let c = (*channel as f32 / 255.0).powf(transformer.gamma)
+                * transformer.whitelevel
+                * (1.0 - transformer.blacklevel)
+                + transformer.blacklevel;
             *channel = (if c >= transformer.threshold { c } else { 0.0 } * 255.0) as u8;
         }
         Rgb8 {
@@ -56,27 +62,28 @@ pub struct Rgb8 {
     pub g: u8,
     pub b: u8,
 }
+
 impl Rgb8 {
     pub fn to_hsv(&self) -> HSV {
         let max = max(max(self.r, self.g), self.b);
         let min = min(min(self.r, self.g), self.b);
         let chroma = max - min;
-
-        let hue = 1.0 / 6.0 *
-                  if chroma == 0 {
-            0.0
-        } else if max == self.r {
-            modulo((self.g as f32 - self.b as f32) / chroma as f32, 6.0)
-        } else if max == self.g {
-            ((self.b as f32 - self.r as f32) / chroma as f32) + 2.0
-        } else {
-            ((self.r as f32 - self.g as f32) / chroma as f32) + 4.0
-        };
-
+        let hue = 1.0 / 6.0
+            * if chroma == 0 {
+                0.0
+            } else if max == self.r {
+                modulo((self.g as f32 - self.b as f32) / chroma as f32, 6.0)
+            } else if max == self.g {
+                ((self.b as f32 - self.r as f32) / chroma as f32) + 2.0
+            } else {
+                ((self.r as f32 - self.g as f32) / chroma as f32) + 4.0
+            };
         let value = max;
-
-        let saturation = if value == 0 { 0.0 } else { chroma as f32 / value as f32 };
-
+        let saturation = if value == 0 {
+            0.0
+        } else {
+            chroma as f32 / value as f32
+        };
         HSV {
             hue: hue,
             saturation: saturation,
@@ -92,6 +99,7 @@ pub struct HSV {
     saturation: f32,
     value: f32,
 }
+
 impl HSV {
     pub fn to_rgb(&self) -> Rgb8 {
         if self.saturation == 0.0 {
@@ -102,31 +110,17 @@ impl HSV {
             let sector = sector_f as u8;
             let factorial_part = sector_f - sector as f32;
             let val = self.value * 255.0;
-
             let p = (val * (1.0 - self.saturation)) as u8;
             let q = (val * (1.0 - self.saturation * factorial_part)) as u8;
             let t = (val * (1.0 - self.saturation * (1.0 - factorial_part))) as u8;
-
             let val = val as u8;
             match sector {
-                0 => {
-                    Rgb8 { r: val, g: t, b: p }
-                }
-                1 => {
-                    Rgb8 { r: q, g: val, b: p }
-                }
-                2 => {
-                    Rgb8 { r: p, g: val, b: t }
-                }
-                3 => {
-                    Rgb8 { r: p, g: q, b: val }
-                }
-                4 => {
-                    Rgb8 { r: t, g: p, b: val }
-                }
-                _ => {
-                    Rgb8 { r: val, g: p, b: q }
-                }
+                0 => Rgb8 { r: val, g: t, b: p },
+                1 => Rgb8 { r: q, g: val, b: p },
+                2 => Rgb8 { r: p, g: val, b: t },
+                3 => Rgb8 { r: p, g: q, b: val },
+                4 => Rgb8 { r: t, g: p, b: val },
+                _ => Rgb8 { r: val, g: p, b: q },
             }
         }
     }
