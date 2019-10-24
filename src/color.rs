@@ -1,4 +1,3 @@
-use simd::f32x4;
 use crate::config::{self, AdditiveColorConf};
 use crate::partial_min;
 use std::cmp::{max, min};
@@ -164,17 +163,13 @@ pub fn linear_smooth(from: Rgb8, to: Rgb8, factor: f32) -> Rgb8 {
     if factor > 1.0 {
         to
     } else {
-        let from_f = f32x4::new(from.r as f32, from.g as f32, from.b as f32, 0.0);
-        let to_f = f32x4::new(to.r as f32, to.g as f32, to.b as f32, 0.0);
-
-        let diff = to_f - from_f;
-
-        let res = from_f + diff * f32x4::splat(factor);
-
+        let from_r = from.r as f32;
+        let from_g = from.g as f32;
+        let from_b = from.b as f32;
         Rgb8 {
-            r: res.extract(0) as u8,
-            g: res.extract(1) as u8,
-            b: res.extract(2) as u8,
+            r: (from_r + (to.r as f32 - from_r) * factor) as u8,
+            g: (from_g + (to.g as f32 - from_g) * factor) as u8,
+            b: (from_b + (to.b as f32 - from_b) * factor) as u8,
         }
     }
 }

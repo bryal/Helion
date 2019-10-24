@@ -16,7 +16,6 @@ serde_json = "1.0"
 captrs = "0.2"
 clock_ticks = "0.1.0"
 serial = "0.3"
-simd = "0.2"
 
 # Optional dependencies
 cpuprofiler = { version = "0.0.3", optional = true }

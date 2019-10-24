@@ -32,7 +32,6 @@ extern crate captrs;
 extern crate clock_ticks;
 extern crate serde_json;
 extern crate serial;
-extern crate simd;
 
 #[cfg(feature = "cpuprofiler")]
 extern crate cpuprofiler;
