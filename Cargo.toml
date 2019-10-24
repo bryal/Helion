@@ -13,7 +13,7 @@ profiling = ["cpuprofiler"]
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-captrs = "0.2"
+captrs = "0.3.0"
 clock_ticks = "0.1.0"
 serial = "0.3"
 
