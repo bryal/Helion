@@ -1,7 +1,8 @@
 [package]
 name = "helion"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["jojo <jo@jo.zone>"]
+license = "AGPL-3.0"
 build = "build.rs"
 edition = "2018"
 
