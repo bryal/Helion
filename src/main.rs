@@ -137,7 +137,20 @@ impl ColorWriter {
     /// each data write
     fn new(port: &str, baud_rate: u32, header: [u8; 6]) -> Self {
         let serial_baud_rate = serial::BaudRate::from_speed(baud_rate as usize);
-        let serial_con = ColorWriter::connect(port, serial_baud_rate).unwrap();
+        let serial_con = loop {
+            print!("Opening serial port... ");
+            match ColorWriter::connect(port, serial_baud_rate) {
+                Ok(con) => {
+                    println!("success!");
+                    break con;
+                }
+                Err(e) => {
+                    println!("error! {:?}", e);
+                    println!("Waiting a little before retrying.");
+                    thread::sleep(time::Duration::from_millis(3000));
+                }
+            }
+        };
         ColorWriter {
             port: port.to_string(),
             baud_rate: serial_baud_rate,
@@ -282,9 +295,6 @@ fn main() {
             }
         }
     }
-    // Header to write before led data
-    let out_header = new_pixel_buf_header(leds.len() as u16);
-    let mut color_writer = ColorWriter::new(&config.device.output, config.device.rate, out_header);
     // Skeleton for the output led pixel buffer to write to arduino
     let mut out_pixels = vec![Rgb8 { r: 0, g: 0, b: 0 }; leds.len()];
     let mut capturer = Some(Capturer::new(config.device.input as usize).unwrap());
@@ -308,6 +318,9 @@ fn main() {
         config.device.input,
         config.device.output
     );
+    // Header to write before led data
+    let out_header = new_pixel_buf_header(leds.len() as u16);
+    let mut color_writer = ColorWriter::new(&config.device.output, config.device.rate, out_header);
     let mut capture_timer = FrameTimer::new();
     let mut led_refresh_timer = FrameTimer::new();
     main_loop(|| {
